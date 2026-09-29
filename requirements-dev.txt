@@ -1,0 +1,7 @@
+# ipxact-compiler and xactflow are overridden below to local sibling checkouts so edits to them
+# take effect immediately. Assumes both are checked out as sibling directories, adjust the paths
+# if yours differ. Comment out either line if you don't need it.
+-r requirements.txt
+-e ../ipxact-compiler
+-e ../XactFlow
+pytest
