@@ -1,0 +1,382 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{parskip}
+
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codekeyword}{RGB}{0,0,150}
+\definecolor{codecomment}{RGB}{110,110,110}
+\definecolor{codestring}{RGB}{150,0,0}
+
+\lstdefinestyle{pyblock}{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{codekeyword},
+    commentstyle=\color{codecomment}\itshape,
+    stringstyle=\color{codestring},
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    framerule=0.3pt,
+    xleftmargin=1em,
+    xrightmargin=1em,
+    tabsize=4,
+    captionpos=b,
+    language=Python,
+}
+\lstdefinestyle{xmlblock}{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    showstringspaces=false,
+    breaklines=true,
+    frame=single,
+    framerule=0.3pt,
+    xleftmargin=1em,
+    xrightmargin=1em,
+    tabsize=4,
+    captionpos=b,
+    language=XML,
+}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+    citecolor=blue,
+}
+
+\newcommand{\code}[1]{\texttt{#1}}
+
+\title{Python design description format}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\section{Introduction}
+
+This document specifies a new \code{XactFlow} \code{Importer}: a way to describe a
+design's architecture (which IPs it instantiates, how they're wired together over buses,
+and any ad hoc signal connections) as a plain Python script, instead of hand-written
+IP-XACT XML. Running the script produces an \code{ipxact.Design} object, which the rest
+of \code{XactFlow} already knows what to do with: \code{elaborate()} resolves and checks
+it against a \code{Library}, and \code{XactFlow-design} can serialize it back out to a
+real IP-XACT \code{design} XML document.
+
+This builds on the design description concept from \emph{IP-XACT-Based SoC Generation:
+Tools and SoCMake Integration} (M.~Travaillard, B.~Denkinger, August 2026), specifically
+its Section 4.3 and the \code{design2ipxact} transformation of Section 5.2. That transformation
+scoped a full SoCMake-integrated pipeline (\code{sv2ipxact}, \code{design2ipxact},
+\code{ipxact2sv}, a shared bus library, radiation-hardening hooks, CMake integration);
+this document only covers the piece of it that becomes a standalone \code{XactFlow}
+\code{Importer}, with no SoCMake or CMake dependency, consistent with every other
+\code{XactFlow} plugin.
+
+\section{Scope}
+
+What this importer does:
+
+\begin{enumerate}
+    \item Execute a Python script that declares IP instances, bus connections, and ad hoc
+    connections using the API below.
+    \item Resolve each IP reference to a real \code{ipxact.Component} via a
+    \code{Library} the script itself provides.
+    \item Build the corresponding \code{ipxact.Design} object: one
+    \code{ComponentInstance} per IP instance, one \code{Interconnection} per bus
+    connection, one \code{AdHocConnection} per ad hoc connection.
+\end{enumerate}
+
+What it deliberately does not do, because \code{XactFlow} already does it elsewhere:
+
+\begin{itemize}
+    \item \textbf{Bus protocol compatibility checking.} \code{connect\_bus()} only
+    matches interfaces by bus definition VLNV and interface mode (see below); it does not
+    check signal-level compatibility, that's \code{xactflow.elaborate()}'s job, via its
+    interconnection-compatibility SCR checks, run after this importer hands off the
+    \code{Design}.
+    \item \textbf{Address conflict checking, memory map validation.} Out of scope for the
+    reasons in Section~\ref{sec:address-mapping}.
+    \item \textbf{Anything else IP-XACT's semantic consistency rules cover.} This
+    importer's only job is producing a syntactically well-formed \code{Design}; whether
+    that \code{Design} is semantically sound, correct cross-references, compatible
+    interfaces, valid addressing, sound hierarchy, and so on, is \code{SCR}'s job,
+    unchanged from how every other \code{Design} (hand-written or otherwise imported) is
+    checked today.
+\end{itemize}
+
+\section{The \texttt{Design} object}
+
+\begin{lstlisting}[style=pyblock, caption={The \texttt{Design} API surface.}]
+class Design:
+    def __init__(self, vlnv: str, library: xactflow.Library) -> None: ...
+    def add_ip(self, instance_name: str, vlnv: str, parameters: dict[str, object] | None = None, transforms: list[str] | None = None) -> IPInstance: ...
+    def connect_bus(self, a: IPInstance | BusInterfaceRef, b: IPInstance | BusInterfaceRef, *, base_addr: int | None = None, size: int | None = None) -> None: ...
+    def connect(self, source: PortRef, target: PortRef) -> None: ...
+    def build(self) -> ipxact.Design: ...
+\end{lstlisting}
+
+\subsection{\texttt{Design(vlnv, library)}}
+
+\begin{itemize}
+    \item \code{vlnv}: a colon-separated \code{"vendor:library:name:version"} string
+    identifying the design itself. Parsed eagerly; a malformed string (not exactly 4
+    fields) raises \code{ValueError} at construction.
+    \item \code{library}: an already-scanned \code{xactflow.Library}. The script builds
+    this itself (\code{Library.scan(...)}) and passes it in, \code{Design} never
+    constructs or owns a \code{Library} implicitly. This keeps the script fully
+    self-contained.
+\end{itemize}
+
+\subsection{\texttt{add\_ip(instance\_name, vlnv, parameters=None, transforms=None) -> IPInstance}}
+
+Declares one component instance and resolves it immediately, not deferred to
+\code{build()}:
+
+\begin{itemize}
+    \item \code{instance\_name} must be unique within the design. A duplicate raises
+    \code{ValueError} immediately, naming both the new call and the earlier one that
+    already used it.
+    \item \code{vlnv} is resolved against \code{library} right away. An unresolvable VLNV
+    raises \code{ValueError} at the \code{add\_ip()} call site, not at the end of the
+    script, so a mistake is reported on the line that made it.
+    \item \code{parameters} maps a parameter's \textbf{name} (as declared on the resolved
+    component) to an override value. This is IP-XACT's own \code{configurableElementValues}
+    feature. For each entry, \code{add\_ip} looks up the matching \code{Parameter} by name
+    on the resolved component:
+    \begin{itemize}
+        \item Unknown name: \code{ValueError}, naming the instance, the bad key, and the
+        parameter names that \emph{are} available on that component.
+        \item Name matches a parameter with no \code{parameterId}: \code{ValueError}.
+        Such a parameter cannot be referenced for override at all, per the standard; this
+        is a defect in the referenced \emph{component} file, not something this importer
+        can paper over (see Section~\ref{sec:relationship-sv} for why this matters in
+        practice).
+        \item Otherwise, the override is recorded against that parameter's
+        \code{parameterId}.
+    \end{itemize}
+    \item \code{transforms} names zero or more downstream transformations to apply to
+    this instance before elaboration, radiation hardening being one example. This
+    importer does nothing with the names itself, it only records them as a vendor
+    extension on the resulting component instance, for some future tool to act on.
+\end{itemize}
+
+Returns an \code{IPInstance} handle (see below) used to build bus and ad hoc connections
+against this instance.
+
+\subsubsection{\texttt{IPInstance}}
+
+A handle returned by \code{add\_ip()}, carrying the instance name and the resolved
+\code{ipxact.Component}.
+
+\begin{lstlisting}[style=pyblock, caption={The \texttt{IPInstance} handle.}]
+class IPInstance:
+    name: str
+    component: ipxact.Component
+
+    def port(self, name: str) -> PortRef: ...
+    def bus(self, name: str) -> BusInterfaceRef: ...
+\end{lstlisting}
+
+\begin{itemize}
+    \item \code{.port(name)} looks up \code{name} in \code{component.model.ports};
+    unknown name raises \code{ValueError} listing the ports that do exist. Used to build
+    ad hoc connections.
+    \item \code{.bus(name)} looks up \code{name} in \code{component.bus\_interfaces};
+    unknown name raises \code{ValueError} the same way. Used only when
+    \code{connect\_bus()} needs help picking the right bus (see below).
+    \item Attribute access (\code{instance.some\_port}) is shorthand for
+    \code{instance.port("some\_port")}, for the common case of wiring up ad hoc
+    connections without the extra call. It raises the same \code{ValueError} as
+    \code{.port()} for an unknown name. Note that \code{name}, \code{component},
+    \code{port}, and \code{bus} are real attributes/methods of \code{IPInstance} itself,
+    so a port that happens to share one of those names cannot be reached this way; the
+    explicit \code{.port(...)} form always works instead.
+\end{itemize}
+
+\subsection{\texttt{connect\_bus(a, b, *, base\_addr=None, size=None)}}
+
+Connects one bus interface on \code{a} to one bus interface on \code{b}. Each argument is
+either a plain \code{IPInstance} (pick one of its bus interfaces automatically) or an
+\code{IPInstance.bus(name)} (use that exact one). Here is how it picks:
+
+\begin{enumerate}
+    \item For each side, the candidates are: the exact interface given, if a
+    \code{bus(name)} was passed; otherwise every bus interface on that instance's
+    component that an earlier \code{connect\_bus()} call has not already used.
+    \item A pair \code{(interface\_a, interface\_b)} matches if they share the same bus
+    VLNV (\code{interface\_a.bus\_type == interface\_b.bus\_type}) and their
+    \code{mode}s are opposite. This first version only matches \code{INITIATOR} with
+    \code{TARGET}; \code{SYSTEM}, \code{MIRRORED\_*}, and \code{MONITOR} modes are real
+    IP-XACT concepts but are not matched automatically here, connecting through one needs
+    an exact, named call instead. There is no need to say which side is the initiator and
+    which is the target: each side's mode is already set on its own component, so this
+    importer reads it instead of asking the script to repeat it.
+    \item If exactly one matching pair exists, it is used.
+    \item If more than one exists, \code{connect\_bus} raises \code{ValueError} listing
+    every candidate interface name on both sides. The caller must then say exactly which
+    one to use, by passing \code{a.bus("...")}/\code{b.bus("...")} for at least one side.
+    A multi-port interconnect (several identical target interfaces, one per attached
+    peripheral) will usually hit this case; it is expected, not an edge case.
+    \item If none matches, \code{ValueError} explains why (no shared bus definition, no
+    opposite mode available, or every candidate already used) and lists what bus
+    interfaces are still free on each side.
+\end{enumerate}
+
+On success, one \code{ipxact.Interconnection} is added to the design, with
+\code{active\_interface} set from \code{a}'s side and \code{other\_active\_interfaces=[<b's
+side>]}. Its name always follows the same pattern, \code{f"\{a.name\}\_to\_\{b.name\}"} (a
+number is added at the end if that name is already taken, e.g.\ a second link between the
+same two instances). Both interfaces are now marked used, so a later
+\code{connect\_bus()} call will not reuse them.
+
+\subsubsection{Address mapping}
+\label{sec:address-mapping}
+
+\code{base\_addr}/\code{size} are a convenience for the common case: a target sitting at
+some offset on an addressable bus. IP-XACT actually handles this through
+\code{addressSpace}/\code{segment} on the initiator side, resolved through a
+\code{designConfiguration}, but \code{XactFlow} doesn't elaborate that yet (see the main
+\code{XactFlow} README's Known Limitations). Doing this the real way is future work, once
+that support exists. Until then, when either is given,
+they're recorded as a vendor extension on the \emph{target} side of the connection, the
+same way IP-XACT represents anything the standard doesn't cover and isn't modeled here
+yet. Concretely, something to the effect of:
+
+\begin{lstlisting}[style=xmlblock, caption={Placeholder address-mapping vendor extension.}]
+<xactflow:addressMapping baseAddr="0x40010000" size="0x1000"/>
+\end{lstlisting}
+
+is appended to that interface's \code{vendor\_extensions}. This is a placeholder, not a
+standards-compliant addressing mechanism; anything reading it back needs to know to look
+for it specifically. It should be revisited (and likely replaced) once \code{XactFlow}
+elaborates \code{DesignConfiguration}/\code{addressSpace} for real.
+
+\subsection{\texttt{connect(source, target)}}
+
+An ad hoc, signal-level connection between exactly two ports, each a \code{PortRef}
+(from \code{.port(name)} or the attribute shorthand). Unlike \code{connect\_bus}, this
+validates immediately rather than deferring to \code{elaborate()}, since the check is
+cheap and both ports are already in hand:
+
+\begin{itemize}
+    \item Both ports must exist (already guaranteed, \code{PortRef} can only be
+    constructed from a real port lookup).
+    \item Directions must be compatible: one \code{out} and one \code{in}, or either side
+    \code{inout}. Two \code{out}s or two \code{in}s raise \code{ValueError} naming both
+    ports and their directions.
+\end{itemize}
+
+On success, appends one \code{ipxact.AdHocConnection} with a single
+\code{InternalPortReference} pair (\code{component\_instance\_ref}/\code{port\_ref} for
+each side), named
+\code{f"\{source.instance.name\}\_\{source.name\}\_to\_\{target.instance.name\}\_\{target.name\}"}.
+Bit-slice or struct-sub-port ad hoc connections (\code{SubPortReference}/\code{PartSelect}
+in \code{ipxact-compiler}'s model) are out of scope for this first version;
+\code{connect()} only wires whole ports to whole ports.
+
+\subsection{\texttt{build() -> ipxact.Design}}
+
+Returns the finished \code{ipxact.Design}: every \code{add\_ip} as a
+\code{ComponentInstance} (in call order), every \code{connect\_bus} as an
+\code{Interconnection}, every \code{connect} as an \code{AdHocConnection}. It does not
+check that every bus interface got connected: an unconnected optional interface (e.g.\ an
+unused debug port) is a legitimate, common design, not an error. Completeness is
+\code{SCR}'s concern, if and when a rule for it exists, not this importer's.
+
+Scripts don't call \code{build()} themselves. The importer does, after running the
+script, see below.
+
+\section{How the importer runs a script}
+
+\begin{lstlisting}[style=pyblock, caption={The \texttt{Importer} entry point.}]
+class ArchidescImporter(xactflow.Importer):
+    def import_(self, source: Path, **options) -> ipxact.Design: ...
+\end{lstlisting}
+
+It executes \code{source} as a plain Python file (\code{runpy.run\_path}), then looks for
+a module-level variable named \code{design}, of type \code{Design}. Missing or
+wrong-typed \code{design} raises \code{ValueError} naming what was expected. It then
+calls \code{.build()} on it and returns the result. Nothing about \code{Library} setup is
+the importer's business, that already happened inside the script when it constructed its
+own \code{Design}.
+
+\section{Worked example}
+
+\begin{lstlisting}[style=pyblock, caption={A complete design description, elaborated in the same script.}]
+from xactflow import Library, elaborate
+from xactflow_archidesc import Design
+
+library = Library.scan("path/to/ip/library")
+design = Design("cern.ch:soc:example:0.1", library)
+
+cpu   = design.add_ip("cpu",   "openhwgroup:core:ibex:1.0", transforms=["tmrg"])
+uart  = design.add_ip("uart",  "cern.ch:ip:uart:1.0", parameters={"BAUDRATE": 115200})
+timer = design.add_ip("timer", "pulp:ip:timer:1.0")
+debug = design.add_ip("debug", "cern.ch:ip:debug_module:1.0")
+bus   = design.add_ip("apb_bus", "cern.socgen:apb_rt:0.1.0")
+
+design.connect_bus(cpu, bus)
+design.connect_bus(bus, uart,  base_addr=0x4001_0000, size=0x1000)
+design.connect_bus(bus, timer, base_addr=0x4002_0000, size=0x1000)
+
+design.connect(debug.debug_req_o, cpu.debug_req_i)
+design.connect(cpu.debug_resp_o, debug.debug_resp_i)
+
+elaborated = elaborate(design.build(), library)
+\end{lstlisting}
+
+\code{design.build()} produces the \code{ipxact.Design}: 5 \code{ComponentInstance}s, 3
+\code{Interconnection}s (\code{cpu\_to\_apb\_bus}, \code{apb\_bus\_to\_uart},
+\code{apb\_bus\_to\_timer}, one per \code{connect\_bus} call), and 2
+\code{AdHocConnection}s. Passing it straight to \code{elaborate()} with the same
+\code{library} resolves and checks it exactly as it would a hand-written or
+hand-exported design, all in this one script, with no separate importer step needed.
+Running the same script through \code{ArchidescImporter} instead (letting the CLI or
+another tool drive it) does that same \code{build()} call automatically; elaboration is
+then up to whatever calls the importer, not shown here.
+
+\section{Requirement on imported components}
+\label{sec:relationship-sv}
+
+\code{add\_ip}'s \code{parameters} argument only works for a component whose parameters
+carry a \code{parameterId}; that's what \code{config\_element\_values} keys by. Any
+component supplied to this format, whether produced by \code{XactFlow-sv}, another
+importer, or hand-written IP-XACT, needs \code{parameterId} set on each parameter meant
+to be overridable this way. One with no \code{parameterId} cannot be referenced for
+override at all, per the standard. This is a general requirement on the components this
+format consumes, not something specific to one importer.
+
+\section{Open questions, deferred rather than silently resolved}
+
+Things this first version leaves open, on purpose:
+
+\begin{itemize}
+    \item \textbf{Hierarchical design description.} A sub-design instantiated as a
+    component inside a bigger one is not addressed here; this format currently describes
+    exactly one flat design. \code{XactFlow}'s own elaborator doesn't recurse into nested
+    designs yet either (see its README's ``No multi-level design hierarchy''
+    limitation), so there is nothing downstream to hand a hierarchical result to yet
+    regardless.
+    \item \textbf{Address mapping}, as above: a real system, not a vendor-extension
+    placeholder, once \code{XactFlow} elaborates
+    \code{DesignConfiguration}/\code{addressSpace}.
+    \item \textbf{Protocol bridges} (e.g.\ an APB-to-OBI adapter between two incompatible
+    bus segments): not addressed. \code{connect\_bus} either finds a matching pair or
+    fails; nothing here automatically adds a bridge component. A bridge, if one exists as
+    a real component, is just another \code{add\_ip} the script author wires in
+    explicitly on both sides, sourced and placed by the user, not made automatically by
+    the tool.
+    \item \textbf{System/mirrored/monitor interface modes}: real IP-XACT concepts,
+    deliberately not auto-matched by \code{connect\_bus} in this first version (see
+    above).
+\end{itemize}
+
+\end{document}
