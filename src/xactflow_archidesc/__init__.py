@@ -5,6 +5,8 @@ from pathlib import Path
 import ipxact
 from xactflow import Importer
 
+from .design import Design, IPInstance
+
 
 class ArchiDescImporter(Importer):
     name = "archidesc"
@@ -13,4 +15,4 @@ class ArchiDescImporter(Importer):
         raise NotImplementedError
 
 
-__all__ = ["__version__", "ArchiDescImporter"]
+__all__ = ["__version__", "ArchiDescImporter", "Design", "IPInstance"]

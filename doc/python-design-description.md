@@ -80,10 +80,14 @@ Declares one component instance and resolves it immediately, not deferred to `bu
     referenced *component* file, not something this importer can paper over (see
     [Requirement on imported components](#requirement-on-imported-components)).
   - Otherwise, the override is recorded against that parameter's `parameterId`.
-- `transforms` names zero or more downstream transformations to apply to this instance
-  before elaboration, radiation hardening being one example. This importer does nothing
-  with the names itself, it only records them as a vendor extension on the resulting
-  component instance, for some future tool to act on.
+- `transforms` names zero or more transformations to apply to this instance, radiation
+  hardening being one example. This importer does not apply them. It only records the
+  names, in order, as a vendor extension on the resulting component instance.
+
+  A separate tool, a transformer, does the work later. It takes the `ipxact.Design`,
+  applies the transformations its instances ask for, and returns the modified
+  `ipxact.Design`, ready for elaboration. A transformer can be kept private, and can be
+  turned on or off without changing the design description.
 
 Returns an `IPInstance` handle (see below) used to build bus and ad hoc connections
 against this instance.
