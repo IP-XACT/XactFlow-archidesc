@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Port 'name' deliberately clashes with an IPInstance attribute. -->
+<ipxact:component xmlns:ipxact="http://www.accellera.org/XMLSchema/IPXACT/1685-2022">
+  <ipxact:vendor>example.org</ipxact:vendor>
+  <ipxact:library>ip</ipxact:library>
+  <ipxact:name>debug_module</ipxact:name>
+  <ipxact:version>1.0</ipxact:version>
+
+  <ipxact:model>
+    <ipxact:ports>
+      <ipxact:port>
+        <ipxact:name>debug_req_o</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>out</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>debug_resp_i</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>debug_req_x</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>out</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>jtag_io</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>inout</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>name</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+    </ipxact:ports>
+  </ipxact:model>
+</ipxact:component>

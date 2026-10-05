@@ -212,8 +212,10 @@ either a plain \code{IPInstance} (pick one of its bus interfaces automatically) 
     \code{bus(name)} was passed; otherwise every bus interface on that instance's
     component that an earlier \code{connect\_bus()} call has not already used.
     \item A pair \code{(interface\_a, interface\_b)} matches if they share the same bus
-    VLNV (\code{interface\_a.bus\_type == interface\_b.bus\_type}) and their
-    \code{mode}s are opposite. This first version only matches \code{INITIATOR} with
+    type, and their \code{mode}s are opposite. The same bus type means the same bus VLNV
+    (\code{interface\_a.bus\_type.vlnv == interface\_b.bus\_type.vlnv}) and the same
+    parameter values set on it (\code{bus\_type.config\_element\_values}), compared after
+    evaluation. This first version only matches \code{INITIATOR} with
     \code{TARGET}; \code{SYSTEM}, \code{MIRRORED\_*}, and \code{MONITOR} modes are real
     IP-XACT concepts but are not matched automatically here, connecting through one needs
     an exact, named call instead. There is no need to say which side is the initiator and
@@ -297,7 +299,7 @@ script, see below.
 \section{How the importer runs a script}
 
 \begin{lstlisting}[style=pyblock, caption={The \texttt{Importer} entry point.}]
-class ArchidescImporter(xactflow.Importer):
+class ArchiDescImporter(xactflow.Importer):
     def import_(self, source: Path, **options) -> ipxact.Design: ...
 \end{lstlisting}
 
@@ -339,7 +341,7 @@ elaborated = elaborate(design.build(), library)
 \code{AdHocConnection}s. Passing it straight to \code{elaborate()} with the same
 \code{library} resolves and checks it exactly as it would a hand-written or
 hand-exported design, all in this one script, with no separate importer step needed.
-Running the same script through \code{ArchidescImporter} instead (letting the CLI or
+Running the same script through \code{ArchiDescImporter} instead (letting the CLI or
 another tool drive it) does that same \code{build()} call automatically; elaboration is
 then up to whatever calls the importer, not shown here.
 
@@ -377,6 +379,12 @@ Things this first version leaves open, on purpose:
     \item \textbf{System/mirrored/monitor interface modes}: real IP-XACT concepts,
     deliberately not auto-matched by \code{connect\_bus} in this first version (see
     above).
+    \item \textbf{Bus type parameter values}: \code{connect\_bus} compares the parameter
+    values set on each side's bus type (a data width, for example), not just the bus VLNV.
+    These values are raw expressions (\code{"32"} and \code{"0x20"} are equal, a value can
+    refer to an instance parameter), so they have to be evaluated before they can be
+    compared. This first version only compares the bus VLNV, until \code{XactFlow}
+    evaluates parameter values well enough to do it.
 \end{itemize}
 
 \end{document}

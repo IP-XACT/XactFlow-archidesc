@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Uses otherbus, to test that connect_bus refuses a bus type mismatch. -->
+<ipxact:component xmlns:ipxact="http://www.accellera.org/XMLSchema/IPXACT/1685-2022">
+  <ipxact:vendor>example.org</ipxact:vendor>
+  <ipxact:library>ip</ipxact:library>
+  <ipxact:name>other_ip</ipxact:name>
+  <ipxact:version>1.0</ipxact:version>
+
+  <ipxact:busInterfaces>
+    <ipxact:busInterface>
+      <ipxact:name>bus_if</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="otherbus" version="1.0"/>
+      <ipxact:target>
+        <ipxact:memoryMapRef memoryMapRef="regs_mm"/>
+      </ipxact:target>
+    </ipxact:busInterface>
+  </ipxact:busInterfaces>
+
+  <ipxact:memoryMaps>
+    <ipxact:memoryMap>
+      <ipxact:name>regs_mm</ipxact:name>
+      <ipxact:addressBlock>
+        <ipxact:name>regs</ipxact:name>
+        <ipxact:baseAddress>0x0</ipxact:baseAddress>
+        <ipxact:range>0x100</ipxact:range>
+        <ipxact:width>32</ipxact:width>
+      </ipxact:addressBlock>
+    </ipxact:memoryMap>
+  </ipxact:memoryMaps>
+
+  <ipxact:model>
+    <ipxact:ports>
+      <ipxact:port>
+        <ipxact:name>clk</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>data</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
+    </ipxact:ports>
+  </ipxact:model>
+</ipxact:component>

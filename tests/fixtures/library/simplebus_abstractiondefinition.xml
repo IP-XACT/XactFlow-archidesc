@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ipxact:abstractionDefinition xmlns:ipxact="http://www.accellera.org/XMLSchema/IPXACT/1685-2022">
+  <ipxact:vendor>example.org</ipxact:vendor>
+  <ipxact:library>bus</ipxact:library>
+  <ipxact:name>simplebus_rtl</ipxact:name>
+  <ipxact:version>1.0</ipxact:version>
+
+  <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+
+  <ipxact:ports>
+    <ipxact:port>
+      <ipxact:logicalName>CLK</ipxact:logicalName>
+      <ipxact:wire>
+        <ipxact:onInitiator>
+          <ipxact:presence>required</ipxact:presence>
+          <ipxact:direction>out</ipxact:direction>
+        </ipxact:onInitiator>
+        <ipxact:onTarget>
+          <ipxact:presence>required</ipxact:presence>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:onTarget>
+      </ipxact:wire>
+    </ipxact:port>
+    <ipxact:port>
+      <ipxact:logicalName>DATA</ipxact:logicalName>
+      <ipxact:wire>
+        <ipxact:onInitiator>
+          <ipxact:presence>required</ipxact:presence>
+          <ipxact:width allBits="true">8</ipxact:width>
+          <ipxact:direction>out</ipxact:direction>
+        </ipxact:onInitiator>
+        <ipxact:onTarget>
+          <ipxact:presence>required</ipxact:presence>
+          <ipxact:width allBits="true">8</ipxact:width>
+          <ipxact:direction>in</ipxact:direction>
+        </ipxact:onTarget>
+      </ipxact:wire>
+    </ipxact:port>
+  </ipxact:ports>
+</ipxact:abstractionDefinition>

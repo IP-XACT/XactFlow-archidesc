@@ -123,8 +123,10 @@ plain `IPInstance` (pick one of its bus interfaces automatically) or an
 1. For each side, the candidates are: the exact interface given, if a `bus(name)` was
    passed; otherwise every bus interface on that instance's component that an earlier
    `connect_bus()` call has not already used.
-2. A pair `(interface_a, interface_b)` matches if they share the same bus VLNV
-   (`interface_a.bus_type == interface_b.bus_type`) and their `mode`s are opposite. This
+2. A pair `(interface_a, interface_b)` matches if they share the same bus type, and
+   their `mode`s are opposite. The same bus type means the same bus VLNV
+   (`interface_a.bus_type.vlnv == interface_b.bus_type.vlnv`) and the same parameter
+   values set on it (`bus_type.config_element_values`), compared after evaluation. This
    first version only matches `INITIATOR` with `TARGET`; `SYSTEM`, `MIRRORED_*`, and
    `MONITOR` modes are real IP-XACT concepts but are not matched automatically here,
    connecting through one needs an exact, named call instead. There is no need to say
@@ -202,7 +204,7 @@ below.
 ## How the importer runs a script
 
 ```python
-class ArchidescImporter(xactflow.Importer):
+class ArchiDescImporter(xactflow.Importer):
     def import_(self, source: Path, **options) -> ipxact.Design: ...
 ```
 
@@ -242,7 +244,7 @@ elaborated = elaborate(design.build(), library)
 `connect_bus` call), and 2 `AdHocConnection`s. Passing it straight to `elaborate()` with
 the same `library` resolves and checks it exactly as it would a hand-written or
 hand-exported design, all in this one script, with no separate importer step needed.
-Running the same script through `ArchidescImporter` instead (letting the CLI or another
+Running the same script through `ArchiDescImporter` instead (letting the CLI or another
 tool drive it) does that same `build()` call automatically; elaboration is then up to
 whatever calls the importer, not shown here.
 
@@ -274,3 +276,9 @@ Things this first version leaves open, on purpose:
   sides, sourced and placed by the user, not made automatically by the tool.
 - **System/mirrored/monitor interface modes**: real IP-XACT concepts, deliberately not
   auto-matched by `connect_bus` in this first version (see above).
+- **Bus type parameter values**: `connect_bus` compares the parameter values set on each
+  side's bus type (a data width, for example), not just the bus VLNV. These values are
+  raw expressions (`"32"` and `"0x20"` are equal, a value can refer to an instance
+  parameter), so they have to be evaluated before they can be compared. This first
+  version only compares the bus VLNV, until `XactFlow` evaluates parameter values well
+  enough to do it.
