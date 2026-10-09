@@ -5,7 +5,7 @@ from pathlib import Path
 import ipxact
 from xactflow import Importer
 
-from .design import Design, IPInstance
+from .design import BusInterfaceRef, Design, IPInstance, PortRef
 
 
 class ArchiDescImporter(Importer):
@@ -15,4 +15,4 @@ class ArchiDescImporter(Importer):
         raise NotImplementedError
 
 
-__all__ = ["__version__", "ArchiDescImporter", "Design", "IPInstance"]
+__all__ = ["__version__", "ArchiDescImporter", "BusInterfaceRef", "Design", "IPInstance", "PortRef"]

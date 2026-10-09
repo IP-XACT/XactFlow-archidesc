@@ -196,13 +196,9 @@ class IPInstance:
     \item \code{.bus(name)} looks up \code{name} in \code{component.bus\_interfaces};
     unknown name raises \code{ValueError} the same way. Used only when
     \code{connect\_bus()} needs help picking the right bus (see below).
-    \item Attribute access (\code{instance.some\_port}) is shorthand for
-    \code{instance.port("some\_port")}, for the common case of wiring up ad hoc
-    connections without the extra call. It raises the same \code{ValueError} as
-    \code{.port()} for an unknown name. Note that \code{name}, \code{component},
-    \code{port}, and \code{bus} are real attributes/methods of \code{IPInstance} itself,
-    so a port that happens to share one of those names cannot be reached this way; the
-    explicit \code{.port(...)} form always works instead.
+    \item \code{instance.some\_port} is a shorthand for \code{instance.port("some\_port")}.
+    If a port has the same name as an \code{IPInstance} attribute, such as \code{name},
+    use \code{.port(...)} instead.
 \end{itemize}
 
 \subsection{\texttt{connect\_bus(a, b, *, base\_addr=None, size=None)}}

@@ -111,12 +111,8 @@ class IPInstance:
 - `.bus(name)` looks up `name` in `component.bus_interfaces`; unknown name raises
   `ValueError` the same way. Used only when `connect_bus()` needs help picking the right
   bus (see below).
-- Attribute access (`instance.some_port`) is shorthand for `instance.port("some_port")`,
-  for the common case of wiring up ad hoc connections without the extra call. It raises
-  the same `ValueError` as `.port()` for an unknown name. Note that `name`, `component`,
-  `port`, and `bus` are real attributes/methods of `IPInstance` itself, so a port that
-  happens to share one of those names cannot be reached this way; the explicit
-  `.port(...)` form always works instead.
+- `instance.some_port` is a shorthand for `instance.port("some_port")`. If a port has
+  the same name as an `IPInstance` attribute, such as `name`, use `.port(...)` instead.
 
 ### `connect_bus(a, b, *, base_addr=None, size=None)`
 

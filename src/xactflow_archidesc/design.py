@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import inspect
 import re
-from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional, Sequence
 from xml.sax.saxutils import quoteattr
 
 import ipxact
@@ -18,6 +18,15 @@ XACTFLOW_NAMESPACE = "https://github.com/IP-XACT/XactFlow"
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
+def _find(items: Sequence[Any], name: str, owner: str, kind: str) -> Any:
+    """Return the item called name, or raise ValueError listing the names that do exist."""
+    for item in items:
+        if item.name == name:
+            return item
+    available = ", ".join(item.name for item in items) or "none"
+    raise ValueError(f"{owner} has no {kind} {name!r}. Available {kind}s: {available}")
+
+
 class IPInstance:
     """A handle on one component instance"""
 
@@ -25,8 +34,46 @@ class IPInstance:
         self.name = name
         self.component = component
 
+    def port(self, name: str) -> PortRef:
+        ports = self.component.model.ports if self.component.model is not None else []
+        port = _find(ports, name, repr(self), "port")
+        return PortRef(self, port.name, port)
+
+    def bus(self, name: str) -> BusInterfaceRef:
+        bus_interface = _find(self.component.bus_interfaces, name, repr(self), "bus interface")
+        return BusInterfaceRef(self, bus_interface.name, bus_interface)
+
+    def __getattr__(self, name: str) -> PortRef:
+        # Python only calls this for names that are not real attributes. Names starting with "_"
+        # are Python's own lookups, so they stay normal missing attributes.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self.port(name)
+
     def __repr__(self) -> str:
         return f"IPInstance({self.name!r}, {self.component.vlnv})"
+
+
+# Two refs are equal when they point at the same instance and name. The ipxact object they
+# carry is left out of comparing, hashing and printing, it is only there to be read.
+
+
+@dataclass(frozen=True)
+class PortRef:
+    """One port of one component instance, used by Design.connect()."""
+
+    instance: IPInstance
+    name: str
+    port: ipxact.Port = field(compare=False, repr=False)
+
+
+@dataclass(frozen=True)
+class BusInterfaceRef:
+    """One bus interface of one component instance, used by Design.connect_bus()."""
+
+    instance: IPInstance
+    name: str
+    bus_interface: ipxact.BusInterface = field(compare=False, repr=False)
 
 
 @dataclass
@@ -71,15 +118,9 @@ def _config_element_values(
     if parameters is None:
         return {}
     _check_type(parameters, dict, f"{where}: parameters")
-    by_name = {parameter.name: parameter for parameter in component.parameters}
     values = {}
     for name, value in parameters.items():
-        parameter = by_name.get(name)
-        if parameter is None:
-            raise ValueError(
-                f"{where}: {component.vlnv} has no parameter {name!r}. "
-                f"Available parameters: {', '.join(by_name) or 'none'}"
-            )
+        parameter = _find(component.parameters, name, f"{where}: {component.vlnv}", "parameter")
         if parameter.parameter_id is None:
             raise ValueError(
                 f"{where}: parameter {name!r} of {component.vlnv} has no parameterId, "
