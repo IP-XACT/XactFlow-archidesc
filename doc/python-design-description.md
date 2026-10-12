@@ -177,14 +177,15 @@ An ad hoc, signal-level connection between exactly two ports, each a `PortRef` (
 rather than deferring to `elaborate()`, since the check is cheap and both ports are
 already in hand:
 
-- Both ports must exist (already guaranteed, `PortRef` can only be constructed from a
-  real port lookup).
+- Both ports must belong to instances of this design.
 - Directions must be compatible: one `out` and one `in`, or either side `inout`. Two
   `out`s or two `in`s raise `ValueError` naming both ports and their directions.
+- A port cannot be connected to itself, and the same two ports cannot be connected twice.
 
 On success, appends one `ipxact.AdHocConnection` with a single `InternalPortReference`
 pair (`component_instance_ref`/`port_ref` for each side), named
-`f"{source.instance.name}_{source.name}_to_{target.instance.name}_{target.name}"`.
+`f"{source.instance.name}_{source.name}_to_{target.instance.name}_{target.name}"`
+(a number is added at the end if that name is already taken).
 Bit-slice or struct-sub-port ad hoc connections (`SubPortReference`/`PartSelect` in
 `ipxact-compiler`'s model) are out of scope for this first version; `connect()` only
 wires whole ports to whole ports.

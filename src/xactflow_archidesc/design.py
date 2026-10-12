@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import AbstractSet, Any, Dict, FrozenSet, List, Optional, Sequence
 from xml.sax.saxutils import quoteattr
 
 import ipxact
@@ -16,6 +16,14 @@ XACTFLOW_NAMESPACE = "https://github.com/IP-XACT/XactFlow"
 
 # Instance names end up as HDL instance names, so they must be plain identifiers.
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# The port directions each direction can be connected to by connect(). A port with any other
+# direction (phantom, or no direction because it is not a wire port) cannot be connected.
+_CONNECTABLE = {
+    ipxact.Direction.IN: {ipxact.Direction.OUT, ipxact.Direction.INOUT},
+    ipxact.Direction.OUT: {ipxact.Direction.IN, ipxact.Direction.INOUT},
+    ipxact.Direction.INOUT: {ipxact.Direction.IN, ipxact.Direction.OUT, ipxact.Direction.INOUT},
+}
 
 
 def _find(items: Sequence[Any], name: str, owner: str, kind: str) -> Any:
@@ -76,8 +84,18 @@ class BusInterfaceRef:
     bus_interface: ipxact.BusInterface = field(compare=False, repr=False)
 
 
+def _direction(ref: PortRef) -> Optional[ipxact.Direction]:
+    return ref.port.wire.direction if ref.port.wire is not None else None
+
+
+def _describe(ref: PortRef) -> str:
+    direction = _direction(ref)
+    return f"{ref.instance.name}.{ref.name} ({direction.value if direction else 'not a wire port'})"
+
+
 @dataclass
 class _InstanceRecord:
+    instance: IPInstance
     component_instance: ipxact.ComponentInstance
     call_site: str
 
@@ -86,6 +104,15 @@ def _caller_site() -> str:
     """Return "file:line" of the code that called the public Design method."""
     caller = inspect.currentframe().f_back.f_back  # skip _caller_site itself, then the Design method
     return f"{caller.f_code.co_filename}:{caller.f_lineno}"
+
+
+def _unique_name(base: str, taken: AbstractSet[str]) -> str:
+    """Return base, or base with a number added if that name is already taken."""
+    name, number = base, 1
+    while name in taken:
+        number += 1
+        name = f"{base}_{number}"
+    return name
 
 
 def _check_type(value: object, expected: type, what: str) -> None:
@@ -154,6 +181,7 @@ class Design:
         self.vlnv = _parse_vlnv(vlnv, "Design(): vlnv")
         self.library = library
         self._instances: Dict[str, _InstanceRecord] = {}
+        self._ad_hoc_connections: Dict[FrozenSet[PortRef], ipxact.AdHocConnection] = {}
 
     def add_ip(
         self,
@@ -177,14 +205,39 @@ class Design:
             ),
             vendor_extensions=_transforms_extensions(where, transforms),
         )
-        self._instances[instance_name] = _InstanceRecord(component_instance, call_site)
-        return IPInstance(instance_name, component)
+        instance = IPInstance(instance_name, component)
+        self._instances[instance_name] = _InstanceRecord(instance, component_instance, call_site)
+        return instance
+
+    def connect(self, source: PortRef, target: PortRef) -> None:
+        """Add one ad hoc connection between two whole ports."""
+        self._check_ref(source, PortRef, "connect(): source")
+        self._check_ref(target, PortRef, "connect(): target")
+        where = f"connect({_describe(source)}, {_describe(target)})"
+        if source == target:
+            raise ValueError(f"{where}: cannot connect a port to itself")
+        if _direction(target) not in _CONNECTABLE.get(_direction(source), set()):
+            raise ValueError(f"{where}: needs one 'in' and one 'out' port, or an 'inout' one")
+        ports = frozenset((source, target))
+        if ports in self._ad_hoc_connections:
+            raise ValueError(f"{where}: these two ports are already connected")
+
+        base_name = f"{source.instance.name}_{source.name}_to_{target.instance.name}_{target.name}"
+        taken = {connection.name for connection in self._ad_hoc_connections.values()}
+        self._ad_hoc_connections[ports] = ipxact.AdHocConnection(
+            name=_unique_name(base_name, taken),
+            internal_port_references=[
+                ipxact.InternalPortReference(component_instance_ref=ref.instance.name, port_ref=ref.name)
+                for ref in (source, target)
+            ],
+        )
 
     def build(self) -> ipxact.Design:
         """Return the ipxact.Design described so far."""
         return ipxact.Design(
             vlnv=self.vlnv,
             component_instances=[record.component_instance for record in self._instances.values()],
+            ad_hoc_connections=list(self._ad_hoc_connections.values()),
         )
 
     def _check_new_instance_name(self, instance_name: object, call_site: str) -> None:
@@ -200,6 +253,13 @@ class Design:
                 f"add_ip() at {call_site}: instance name '{instance_name}' is already used "
                 f"by add_ip() at {earlier.call_site}"
             )
+
+    def _check_ref(self, ref: object, expected: type, what: str) -> None:
+        """Check that ref has the expected type and belongs to an instance of this design."""
+        _check_type(ref, expected, what)
+        record = self._instances.get(ref.instance.name)
+        if record is None or record.instance is not ref.instance:
+            raise ValueError(f"{what}: {ref.instance!r} was not added to this design")
 
     def _resolve_component(self, where: str, vlnv: ipxact.VLNV) -> ipxact.Component:
         document = self.library.get(vlnv)

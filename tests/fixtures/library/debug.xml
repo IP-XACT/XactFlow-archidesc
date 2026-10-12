@@ -38,6 +38,12 @@
           <ipxact:direction>in</ipxact:direction>
         </ipxact:wire>
       </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>sense_phantom</ipxact:name>
+        <ipxact:wire>
+          <ipxact:direction>phantom</ipxact:direction>
+        </ipxact:wire>
+      </ipxact:port>
     </ipxact:ports>
   </ipxact:model>
 </ipxact:component>

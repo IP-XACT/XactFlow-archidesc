@@ -269,17 +269,19 @@ validates immediately rather than deferring to \code{elaborate()}, since the che
 cheap and both ports are already in hand:
 
 \begin{itemize}
-    \item Both ports must exist (already guaranteed, \code{PortRef} can only be
-    constructed from a real port lookup).
+    \item Both ports must belong to instances of this design.
     \item Directions must be compatible: one \code{out} and one \code{in}, or either side
     \code{inout}. Two \code{out}s or two \code{in}s raise \code{ValueError} naming both
     ports and their directions.
+    \item A port cannot be connected to itself, and the same two ports cannot be
+    connected twice.
 \end{itemize}
 
 On success, appends one \code{ipxact.AdHocConnection} with a single
 \code{InternalPortReference} pair (\code{component\_instance\_ref}/\code{port\_ref} for
 each side), named
-\code{f"\{source.instance.name\}\_\{source.name\}\_to\_\{target.instance.name\}\_\{target.name\}"}.
+\code{f"\{source.instance.name\}\_\{source.name\}\_to\_\{target.instance.name\}\_\{target.name\}"}
+(a number is added at the end if that name is already taken).
 Bit-slice or struct-sub-port ad hoc connections (\code{SubPortReference}/\code{PartSelect}
 in \code{ipxact-compiler}'s model) are out of scope for this first version;
 \code{connect()} only wires whole ports to whole ports.
