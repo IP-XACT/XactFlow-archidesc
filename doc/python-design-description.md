@@ -121,15 +121,17 @@ plain `IPInstance` (pick one of its bus interfaces automatically) or an
 `IPInstance.bus(name)` (use that exact one). Here is how it picks:
 
 1. For each side, the candidates are: the exact interface given, if a `bus(name)` was
-   passed; otherwise every bus interface on that instance's component that an earlier
-   `connect_bus()` call has not already used.
+   passed; otherwise every initiator or target interface on that instance's component
+   that an earlier `connect_bus()` call has not already used.
 2. A pair `(interface_a, interface_b)` matches if they share the same bus type, and
    their `mode`s are opposite. The same bus type means the same bus VLNV
    (`interface_a.bus_type.vlnv == interface_b.bus_type.vlnv`) and the same parameter
-   values set on it (`bus_type.config_element_values`), compared after evaluation. This
-   first version only matches `INITIATOR` with `TARGET`; `SYSTEM`, `MIRRORED_*`, and
-   `MONITOR` modes are real IP-XACT concepts but are not matched automatically here,
-   connecting through one needs an exact, named call instead. There is no need to say
+   values set on it (`bus_type.config_element_values`), compared after evaluation. The
+   modes that connect are the ones the standard allows: initiator with target or
+   mirrored initiator, mirrored target with target, and system with mirrored system. A
+   monitor interface matches an interface of the mode it monitors. Only initiators and
+   targets are picked automatically, the other modes need the exact, named call. There
+   is no need to say
    which side is the initiator and which is the target: each side's mode is already set
    on its own component, so this importer reads it instead of asking the script to
    repeat it.
@@ -149,6 +151,10 @@ the same pattern, `f"{a.name}_to_{b.name}"` (a number is added at the end if tha
 already taken, e.g. a second link between the same two instances). Both interfaces are
 now marked used, so a later `connect_bus()` call will not reuse them.
 
+When one side is a monitor, an `ipxact.MonitorInterconnection` is added instead. Only the
+monitor interface is marked used: the interface it watches stays free for a normal
+connection.
+
 #### Address mapping
 
 `base_addr`/`size` are a convenience for the common case: a target sitting at some offset
@@ -158,7 +164,9 @@ elaborate that yet (see the main `XactFlow`
 [README](https://github.com/IP-XACT/XactFlow#known-limitations)). Doing this the real way
 is future work, once that support exists. Until then,
 when either is given, they're recorded as a vendor extension on the *target* side of the
-connection, the same way IP-XACT represents anything the standard doesn't cover and
+connection (a target or mirrored initiator interface). A connection with no such side,
+like a system or monitor one, raises `ValueError`. This is the same way IP-XACT
+represents anything the standard doesn't cover and
 isn't modeled here yet. Concretely, something to the effect of:
 
 ```xml
@@ -181,6 +189,7 @@ already in hand:
 - Directions must be compatible: one `out` and one `in`, or either side `inout`. Two
   `out`s or two `in`s raise `ValueError` naming both ports and their directions.
 - A port cannot be connected to itself, and the same two ports cannot be connected twice.
+- An `in` port can only be driven by one connection.
 
 On success, appends one `ipxact.AdHocConnection` with a single `InternalPortReference`
 pair (`component_instance_ref`/`port_ref` for each side), named

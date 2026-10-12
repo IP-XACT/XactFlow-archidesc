@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bus interfaces in the modes connect_bus() only connects when named, and ports that are not wire ports. -->
+<ipxact:component xmlns:ipxact="http://www.accellera.org/XMLSchema/IPXACT/1685-2022">
+  <ipxact:vendor>example.org</ipxact:vendor>
+  <ipxact:library>ip</ipxact:library>
+  <ipxact:name>bridge</ipxact:name>
+  <ipxact:version>1.0</ipxact:version>
+
+  <ipxact:busInterfaces>
+    <ipxact:busInterface>
+      <ipxact:name>mi</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+      <ipxact:mirroredInitiator/>
+    </ipxact:busInterface>
+    <ipxact:busInterface>
+      <ipxact:name>mt</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+      <ipxact:mirroredTarget/>
+    </ipxact:busInterface>
+    <ipxact:busInterface>
+      <ipxact:name>sys</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+      <ipxact:system>
+        <ipxact:group>g</ipxact:group>
+      </ipxact:system>
+    </ipxact:busInterface>
+    <ipxact:busInterface>
+      <ipxact:name>msys</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+      <ipxact:mirroredSystem>
+        <ipxact:group>g</ipxact:group>
+      </ipxact:mirroredSystem>
+    </ipxact:busInterface>
+    <ipxact:busInterface>
+      <ipxact:name>mon</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+      <ipxact:monitor interfaceMode="target"/>
+    </ipxact:busInterface>
+  </ipxact:busInterfaces>
+
+  <ipxact:model>
+    <ipxact:ports>
+      <ipxact:port>
+        <ipxact:name>tlm_req</ipxact:name>
+        <ipxact:transactional>
+          <ipxact:initiative>requires</ipxact:initiative>
+        </ipxact:transactional>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>tlm_prov</ipxact:name>
+        <ipxact:transactional>
+          <ipxact:initiative>provides</ipxact:initiative>
+        </ipxact:transactional>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>st_o</ipxact:name>
+        <ipxact:structured>
+          <ipxact:struct direction="out"/>
+        </ipxact:structured>
+      </ipxact:port>
+      <ipxact:port>
+        <ipxact:name>st_i</ipxact:name>
+        <ipxact:structured>
+          <ipxact:struct direction="in"/>
+        </ipxact:structured>
+      </ipxact:port>
+    </ipxact:ports>
+  </ipxact:model>
+</ipxact:component>

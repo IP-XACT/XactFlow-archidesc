@@ -209,16 +209,17 @@ either a plain \code{IPInstance} (pick one of its bus interfaces automatically) 
 
 \begin{enumerate}
     \item For each side, the candidates are: the exact interface given, if a
-    \code{bus(name)} was passed; otherwise every bus interface on that instance's
-    component that an earlier \code{connect\_bus()} call has not already used.
+    \code{bus(name)} was passed; otherwise every initiator or target interface on that
+    instance's component that an earlier \code{connect\_bus()} call has not already used.
     \item A pair \code{(interface\_a, interface\_b)} matches if they share the same bus
     type, and their \code{mode}s are opposite. The same bus type means the same bus VLNV
     (\code{interface\_a.bus\_type.vlnv == interface\_b.bus\_type.vlnv}) and the same
     parameter values set on it (\code{bus\_type.config\_element\_values}), compared after
-    evaluation. This first version only matches \code{INITIATOR} with
-    \code{TARGET}; \code{SYSTEM}, \code{MIRRORED\_*}, and \code{MONITOR} modes are real
-    IP-XACT concepts but are not matched automatically here, connecting through one needs
-    an exact, named call instead. There is no need to say which side is the initiator and
+    evaluation. The modes that connect are the ones the standard allows: initiator with
+    target or mirrored initiator, mirrored target with target, and system with mirrored
+    system. A monitor interface matches an interface of the mode it monitors. Only
+    initiators and targets are picked automatically, the other modes need the exact,
+    named call. There is no need to say which side is the initiator and
     which is the target: each side's mode is already set on its own component, so this
     importer reads it instead of asking the script to repeat it.
     \item If exactly one matching pair exists, it is used.
@@ -239,6 +240,10 @@ number is added at the end if that name is already taken, e.g.\ a second link be
 same two instances). Both interfaces are now marked used, so a later
 \code{connect\_bus()} call will not reuse them.
 
+When one side is a monitor, an \code{ipxact.MonitorInterconnection} is added instead.
+Only the monitor interface is marked used: the interface it watches stays free for a
+normal connection.
+
 \subsubsection{Address mapping}
 \label{sec:address-mapping}
 
@@ -248,8 +253,9 @@ some offset on an addressable bus. IP-XACT actually handles this through
 \code{designConfiguration}, but \code{XactFlow} doesn't elaborate that yet (see the main
 \code{XactFlow} README's Known Limitations). Doing this the real way is future work, once
 that support exists. Until then, when either is given,
-they're recorded as a vendor extension on the \emph{target} side of the connection, the
-same way IP-XACT represents anything the standard doesn't cover and isn't modeled here
+they're recorded as a vendor extension on the \emph{target} side of the connection (a
+target or mirrored initiator interface). A connection with no such side, like a system
+or monitor one, raises \code{ValueError}. This is the same way IP-XACT represents anything the standard doesn't cover and isn't modeled here
 yet. Concretely, something to the effect of:
 
 \begin{lstlisting}[style=xmlblock, caption={Placeholder address-mapping vendor extension.}]
@@ -275,6 +281,7 @@ cheap and both ports are already in hand:
     ports and their directions.
     \item A port cannot be connected to itself, and the same two ports cannot be
     connected twice.
+    \item An \code{in} port can only be driven by one connection.
 \end{itemize}
 
 On success, appends one \code{ipxact.AdHocConnection} with a single
