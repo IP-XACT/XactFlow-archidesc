@@ -2,7 +2,6 @@ __version__ = "0.1.0"
 
 from pathlib import Path
 
-import ipxact
 from xactflow import Importer
 
 from .design import BusInterfaceRef, Design, IPInstance, PortRef

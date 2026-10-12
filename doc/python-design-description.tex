@@ -154,9 +154,10 @@ Declares one component instance and resolves it immediately, not deferred to
     \begin{itemize}
         \item Unknown name: \code{ValueError}, naming the instance, the bad key, and the
         parameter names that \emph{are} available on that component.
-        \item Name matches a parameter with no \code{parameterId}: \code{ValueError}.
-        Such a parameter cannot be referenced for override at all, per the standard; this
-        is a defect in the referenced \emph{component} file, not something this importer
+        \item Name matches a parameter that cannot be overridden: \code{ValueError}. It
+        needs a \code{parameterId} and \code{resolve="user"}. The standard says an
+        \code{immediate} parameter (the default) cannot be modified through configuration.
+        This is a defect in the referenced \emph{component} file, not something this importer
         can paper over (see Section~\ref{sec:relationship-sv} for why this matters in
         practice).
         \item Otherwise, the override is recorded against that parameter's
@@ -360,9 +361,10 @@ then up to whatever calls the importer, not shown here.
 \code{add\_ip}'s \code{parameters} argument only works for a component whose parameters
 carry a \code{parameterId}; that's what \code{config\_element\_values} keys by. Any
 component supplied to this format, whether produced by \code{XactFlow-sv}, another
-importer, or hand-written IP-XACT, needs \code{parameterId} set on each parameter meant
-to be overridable this way. One with no \code{parameterId} cannot be referenced for
-override at all, per the standard. This is a general requirement on the components this
+importer, or hand-written IP-XACT, needs \code{parameterId} and \code{resolve="user"} set
+on each parameter meant to be overridable this way. One with no \code{parameterId} cannot
+be referenced for override at all, and one with \code{resolve="immediate"} cannot be
+modified through configuration, per the standard. This is a general requirement on the components this
 format consumes, not something specific to one importer.
 
 \section{Open questions, deferred rather than silently resolved}

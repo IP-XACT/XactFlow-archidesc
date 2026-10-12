@@ -235,17 +235,22 @@ def _expression(value: object, what: str) -> str:
 def _config_element_values(
     where: str, component: ipxact.Component, parameters: Optional[Dict[str, object]]
 ) -> Dict[str, str]:
-    """Turn add_ip()'s parameter overrides into configurableElementValues, keyed by parameterId."""
+    """Turn add_ip()'s parameter overrides into configurableElementValues, keyed by parameterId.
+
+    Only a parameter with resolve="user" can be overridden. The standard says an "immediate"
+    one cannot be modified through configuration, and a "generated" one is set by generators.
+    """
     if parameters is None:
         return {}
     _check_type(parameters, dict, f"{where}: parameters")
     values = {}
     for name, value in parameters.items():
         parameter = _find(component.parameters, name, f"{where}: {component.vlnv}", "parameter")
-        if parameter.parameter_id is None:
+        if parameter.parameter_id is None or parameter.resolve != "user":
             raise ValueError(
-                f"{where}: parameter {name!r} of {component.vlnv} has no parameterId, "
-                f"so it cannot be overridden. This needs fixing in the component file"
+                f"{where}: parameter {name!r} of {component.vlnv} cannot be overridden, it needs a "
+                f"parameterId and resolve=\"user\" (it has parameterId={parameter.parameter_id!r}, "
+                f"resolve={parameter.resolve!r}). This needs fixing in the component file"
             )
         values[parameter.parameter_id] = _expression(value, f"{where}: parameter {name!r}")
     return values

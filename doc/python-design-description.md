@@ -75,8 +75,9 @@ Declares one component instance and resolves it immediately, not deferred to `bu
   entry, `add_ip` looks up the matching `Parameter` by name on the resolved component:
   - Unknown name: `ValueError`, naming the instance, the bad key, and the parameter names
     that *are* available on that component.
-  - Name matches a parameter with no `parameterId`: `ValueError`. Such a parameter cannot
-    be referenced for override at all, per the standard; this is a defect in the
+  - Name matches a parameter that cannot be overridden: `ValueError`. It needs a
+    `parameterId` and `resolve="user"`. The standard says an `immediate` parameter (the
+    default) cannot be modified through configuration. This is a defect in the
     referenced *component* file, not something this importer can paper over (see
     [Requirement on imported components](#requirement-on-imported-components)).
   - Otherwise, the override is recorded against that parameter's `parameterId`.
@@ -263,8 +264,10 @@ whatever calls the importer, not shown here.
 `add_ip`'s `parameters` argument only works for a component whose parameters carry a
 `parameterId`; that's what `config_element_values` keys by. Any component supplied to
 this format, whether produced by `XactFlow-sv`, another importer, or hand-written
-IP-XACT, needs `parameterId` set on each parameter meant to be overridable this way. One
-with no `parameterId` cannot be referenced for override at all, per the standard. This is
+IP-XACT, needs `parameterId` and `resolve="user"` set on each parameter meant to be
+overridable this way. One with no `parameterId` cannot be referenced for override at all,
+and one with `resolve="immediate"` cannot be modified through configuration, per the
+standard. This is
 a general requirement on the components this format consumes, not something specific to
 one importer.
 

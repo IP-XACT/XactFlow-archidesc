@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- NO_ID deliberately has no parameterId, to test that it cannot be overridden. -->
+<!-- NO_ID has no parameterId and FIXED has the default resolve="immediate", so neither can be overridden. -->
 <ipxact:component xmlns:ipxact="http://www.accellera.org/XMLSchema/IPXACT/1685-2022">
   <ipxact:vendor>example.org</ipxact:vendor>
   <ipxact:library>ip</ipxact:library>
@@ -80,6 +80,10 @@
     <ipxact:parameter resolve="user">
       <ipxact:name>NO_ID</ipxact:name>
       <ipxact:value>0</ipxact:value>
+    </ipxact:parameter>
+    <ipxact:parameter parameterId="FIXED">
+      <ipxact:name>FIXED</ipxact:name>
+      <ipxact:value>1</ipxact:value>
     </ipxact:parameter>
   </ipxact:parameters>
 </ipxact:component>

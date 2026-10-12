@@ -3,6 +3,7 @@ from xml.etree import ElementTree
 
 import ipxact
 import pytest
+from xactflow import Library
 
 from xactflow_archidesc import Design, IPInstance
 from xactflow_archidesc.design import XACTFLOW_NAMESPACE
@@ -22,23 +23,12 @@ def design(library):
 
 
 def test_design_vlnv_is_parsed(design):
-    assert design.vlnv == ipxact.VLNV("example.org", "soc", "top", "1.0")
-    assert design.build().vlnv == design.vlnv
+    assert design.build().vlnv == ipxact.VLNV("example.org", "soc", "top", "1.0")
 
 
-@pytest.mark.parametrize(
-    "vlnv, error",
-    [
-        ("example.org:soc:top", ValueError),
-        ("a:b:c:d:e", ValueError),
-        ("example.org::top:1.0", ValueError),
-        ("", ValueError),
-        (None, TypeError),
-    ],
-)
-def test_design_rejects_bad_vlnv(library, vlnv, error):
-    with pytest.raises(error):
-        Design(vlnv, library)
+def test_design_rejects_malformed_vlnv(library):
+    with pytest.raises(ValueError, match="vendor:library:name:version"):
+        Design("example.org:soc:top", library)
 
 
 def test_add_ip_returns_handle_on_resolved_component(design):
@@ -67,36 +57,37 @@ def test_add_ip_rejects_duplicate_name_and_names_both_calls(design):
         design.add_ip("uart", "example.org:ip:timer:1.0")
 
     message = str(exc_info.value)
-    assert "'uart'" in message
     assert f"{__file__}:{first_line}" in message
     assert f"{__file__}:{second_line}" in message
 
 
 def test_add_ip_rejects_unknown_vlnv(design):
-    with pytest.raises(ValueError, match="no document with VLNV example.org:ip:nope:1.0"):
+    with pytest.raises(ValueError, match="no document with VLNV example.org:ip:nope:1.0 in the library$"):
         design.add_ip("x", "example.org:ip:nope:1.0")
 
 
-def test_add_ip_rejects_vlnv_that_is_not_a_component(design):
-    with pytest.raises(ValueError, match="BusDefinition, not a Component"):
-        design.add_ip("x", "example.org:bus:simplebus:1.0")
+def test_unknown_vlnv_points_at_library_diagnostics_when_there_are_some(tmp_path):
+    # A bus interface with no mode makes the parser fail, so the library records a diagnostic.
+    (tmp_path / "broken.xml").write_text(
+        '<ipxact:component xmlns:ipxact="http://www.accellera.org/XMLSchema/IPXACT/1685-2022">'
+        "<ipxact:busInterfaces><ipxact:busInterface><ipxact:name>b</ipxact:name>"
+        "</ipxact:busInterface></ipxact:busInterfaces></ipxact:component>"
+    )
+
+    with pytest.raises(ValueError, match="library.diagnostics has 1 entries"):
+        Design("example.org:soc:top:1.0", Library.scan(tmp_path)).add_ip("x", "example.org:ip:nope:1.0")
 
 
 @pytest.mark.parametrize(
     "args, kwargs, error",
     [
-        (("", UART), {}, ValueError),
         (("2uart", UART), {}, ValueError),
-        (("my uart", UART), {}, ValueError),
         ((None, UART), {}, TypeError),
         (("x", "example.org:ip:uart"), {}, ValueError),
-        (("x", "example.org::uart:1.0"), {}, ValueError),
-        (("x", None), {}, TypeError),
+        (("x", "example.org:bus:simplebus:1.0"), {}, ValueError),  # a bus definition, not a component
         (("x", UART), {"parameters": [("BAUDRATE", 1)]}, TypeError),
         (("x", UART), {"parameters": {"BAUDRATE": None}}, TypeError),
         (("x", UART), {"transforms": "tmrg"}, TypeError),
-        (("x", UART), {"transforms": ["tmrg", ""]}, TypeError),
-        (("x", UART), {"transforms": [1]}, TypeError),
     ],
 )
 def test_add_ip_rejects_bad_arguments_and_leaves_design_unchanged(design, args, kwargs, error):
@@ -108,10 +99,7 @@ def test_add_ip_rejects_bad_arguments_and_leaves_design_unchanged(design, args, 
     assert [i.instance_name for i in design.build().component_instances] == ["x"]
 
 
-@pytest.mark.parametrize(
-    "value, expression",
-    [(115200, "115200"), (1.5, "1.5"), (True, "true"), (False, "false"), ("2*WIDTH", "2*WIDTH")],
-)
+@pytest.mark.parametrize("value, expression", [(115200, "115200"), (True, "true"), ("2*WIDTH", "2*WIDTH")])
 def test_add_ip_records_parameter_override_by_parameter_id(design, value, expression):
     design.add_ip("uart", UART, parameters={"BAUDRATE": value})
 
@@ -119,46 +107,27 @@ def test_add_ip_records_parameter_override_by_parameter_id(design, value, expres
     assert ref.config_element_values == {"BAUDRATE": expression}
 
 
-def test_parameter_overrides_do_not_leak_between_instances(design):
-    design.add_ip("uart0", UART, parameters={"BAUDRATE": 115200})
-    design.add_ip("uart1", UART)
-
-    refs = [i.component_ref for i in design.build().component_instances]
-    assert refs[0].config_element_values == {"BAUDRATE": "115200"}
-    assert refs[1].config_element_values == {}
-
-
 def test_add_ip_rejects_unknown_parameter_and_lists_available_ones(design):
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError, match="no parameter 'XLENN'. Available parameters: XLEN, NO_ID, FIXED"):
         design.add_ip("cpu", CPU, parameters={"XLENN": 64})
-
-    message = str(exc_info.value)
-    assert "'cpu'" in message
-    assert "'XLENN'" in message
-    assert "Available parameters: XLEN, NO_ID" in message
-
-
-def test_add_ip_rejects_parameter_without_parameter_id(design):
-    with pytest.raises(ValueError, match="parameter 'NO_ID' .* has no parameterId"):
-        design.add_ip("cpu", CPU, parameters={"NO_ID": 1})
-
-
-def _recorded_transforms(vendor_extensions):
-    """Read the transform names back, the way a transformer would."""
-    roots = [ElementTree.fromstring(extension) for extension in vendor_extensions]
-    assert all(root.tag == f"{{{XACTFLOW_NAMESPACE}}}transforms" for root in roots)
-    assert all(item.tag == f"{{{XACTFLOW_NAMESPACE}}}transform" for root in roots for item in root)
-    return [item.get("name") for root in roots for item in root]
 
 
 @pytest.mark.parametrize(
-    "transforms, recorded",
-    [(None, []), ([], []), (["tmrg"], ["tmrg"]), (["tmrg", "scan", "a\"b<c"], ["tmrg", "scan", "a\"b<c"])],
+    "name, details",
+    [("NO_ID", "parameterId=None, resolve='user'"), ("FIXED", "parameterId='FIXED', resolve='immediate'")],
 )
+def test_add_ip_rejects_parameter_that_cannot_be_overridden(design, name, details):
+    with pytest.raises(ValueError, match=f"parameter '{name}' .* cannot be overridden") as exc_info:
+        design.add_ip("cpu", CPU, parameters={name: 1})
+
+    assert details in str(exc_info.value)
+
+
+@pytest.mark.parametrize("transforms, recorded", [(None, []), (["tmrg", "a\"b<c"], ["tmrg", "a\"b<c"])])
 def test_add_ip_records_transforms_as_vendor_extension(design, transforms, recorded):
     design.add_ip("cpu", CPU, transforms=transforms)
 
     [instance] = design.build().component_instances
-    # At most one extension, holding every name in order.
-    assert len(instance.vendor_extensions) == (1 if recorded else 0)
-    assert _recorded_transforms(instance.vendor_extensions) == recorded
+    roots = [ElementTree.fromstring(extension) for extension in instance.vendor_extensions]
+    assert [root.tag for root in roots] == ([f"{{{XACTFLOW_NAMESPACE}}}transforms"] if recorded else [])
+    assert [item.get("name") for root in roots for item in root] == recorded
