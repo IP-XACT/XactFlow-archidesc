@@ -41,6 +41,8 @@ Issues = "https://github.com/IP-XACT/XactFlow-archidesc/issues"
 [project.optional-dependencies]
 dev = [
     "pytest",
+    # For the end-to-end test, exporting to XML for visual verification.
+    "xactflow-design",
 ]
 
 [project.entry-points."xactflow.importers"]
