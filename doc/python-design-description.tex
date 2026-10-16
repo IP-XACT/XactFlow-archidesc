@@ -91,14 +91,15 @@ What this importer does:
     \code{Library} the script itself provides.
     \item Build the corresponding \code{ipxact.Design} object: one
     \code{ComponentInstance} per IP instance, one \code{Interconnection} per bus
-    connection, one \code{AdHocConnection} per ad hoc connection.
+    connection (a \code{MonitorInterconnection} when one side is a monitor), one
+    \code{AdHocConnection} per ad hoc connection.
 \end{enumerate}
 
 What it deliberately does not do, because \code{XactFlow} already does it elsewhere:
 
 \begin{itemize}
     \item \textbf{Bus protocol compatibility checking.} \code{connect\_bus()} only
-    matches interfaces by bus definition VLNV and interface mode (see below); it does not
+    matches interfaces by bus type and interface mode (see below); it does not
     check signal-level compatibility, that's \code{xactflow.elaborate()}'s job, via its
     interconnection-compatibility SCR checks, run after this importer hands off the
     \code{Design}.
@@ -141,7 +142,9 @@ Declares one component instance and resolves it immediately, not deferred to
 \code{build()}:
 
 \begin{itemize}
-    \item \code{instance\_name} must be unique within the design. A duplicate raises
+    \item \code{instance\_name} must follow the IP-XACT naming rule: it starts with a letter
+    or \code{\_}, not a digit, followed by letters, digits, \code{\_}, \code{.} or
+    \code{-}. It must also be unique within the design. A duplicate raises
     \code{ValueError} immediately, naming both the new call and the earlier one that
     already used it.
     \item \code{vlnv} is resolved against \code{library} right away. An unresolvable VLNV
@@ -227,7 +230,7 @@ either a plain \code{IPInstance} (pick one of its bus interfaces automatically) 
     \item If more than one exists, \code{connect\_bus} raises \code{ValueError} listing
     every candidate interface name on both sides. The caller must then say exactly which
     one to use, by passing \code{a.bus("...")}/\code{b.bus("...")} for at least one side.
-    A multi-port interconnect (several identical target interfaces, one per attached
+    A multi-port interconnect (several identical initiator interfaces, one per attached
     peripheral) will usually hit this case; it is expected, not an edge case.
     \item If none matches, \code{ValueError} explains why (no shared bus definition, no
     opposite mode available, or every candidate already used) and lists what bus
@@ -236,7 +239,8 @@ either a plain \code{IPInstance} (pick one of its bus interfaces automatically) 
 
 On success, one \code{ipxact.Interconnection} is added to the design, with
 \code{active\_interface} set from \code{a}'s side and \code{other\_active\_interfaces=[<b's
-side>]}. Its name always follows the same pattern, \code{f"\{a.name\}\_to\_\{b.name\}"} (a
+side>]}. Its name always follows the same pattern, \code{<instance a>\_to\_<instance b>},
+built from the two instance names even when an interface is named with \code{.bus(...)} (a
 number is added at the end if that name is already taken, e.g.\ a second link between the
 same two instances). Both interfaces are now marked used, so a later
 \code{connect\_bus()} call will not reuse them.
@@ -256,8 +260,9 @@ some offset on an addressable bus. IP-XACT actually handles this through
 that support exists. Until then, when either is given,
 they're recorded as a vendor extension on the \emph{target} side of the connection (a
 target or mirrored initiator interface). A connection with no such side, like a system
-or monitor one, raises \code{ValueError}. This is the same way IP-XACT represents anything the standard doesn't cover and isn't modeled here
-yet. Concretely, something to the effect of:
+or monitor one, raises \code{ValueError}. This is the same way IP-XACT represents
+anything the standard doesn't cover and isn't modeled here yet. Concretely, something to
+the effect of:
 
 \begin{lstlisting}[style=xmlblock, caption={Placeholder address-mapping vendor extension.}]
 <xactflow:addressMapping baseAddr="0x40010000" size="0x1000"/>
@@ -271,9 +276,9 @@ elaborates \code{DesignConfiguration}/\code{addressSpace} for real.
 \subsection{\texttt{connect(source, target)}}
 
 An ad hoc, signal-level connection between exactly two ports, each a \code{PortRef}
-(from \code{.port(name)} or the attribute shorthand). Unlike \code{connect\_bus}, this
-validates immediately rather than deferring to \code{elaborate()}, since the check is
-cheap and both ports are already in hand:
+(from \code{.port(name)} or the attribute shorthand). Unlike \code{connect\_bus}, which
+leaves signal-level compatibility to \code{elaborate()}, \code{connect} checks the ports
+itself, since the check is cheap and both ports are already in hand:
 
 \begin{itemize}
     \item Both ports must belong to instances of this design.
@@ -298,7 +303,8 @@ in \code{ipxact-compiler}'s model) are out of scope for this first version;
 
 Returns the finished \code{ipxact.Design}: every \code{add\_ip} as a
 \code{ComponentInstance} (in call order), every \code{connect\_bus} as an
-\code{Interconnection}, every \code{connect} as an \code{AdHocConnection}. It does not
+\code{Interconnection} (or a \code{MonitorInterconnection} for a monitor), every
+\code{connect} as an \code{AdHocConnection}. It does not
 check that every bus interface got connected: an unconnected optional interface (e.g.\ an
 unused debug port) is a legitimate, common design, not an error. Completeness is
 \code{SCR}'s concern, if and when a rule for it exists, not this importer's.
@@ -364,8 +370,8 @@ component supplied to this format, whether produced by \code{XactFlow-sv}, anoth
 importer, or hand-written IP-XACT, needs \code{parameterId} and \code{resolve="user"} set
 on each parameter meant to be overridable this way. One with no \code{parameterId} cannot
 be referenced for override at all, and one with \code{resolve="immediate"} cannot be
-modified through configuration, per the standard. This is a general requirement on the components this
-format consumes, not something specific to one importer.
+modified through configuration, per the standard. This is a general requirement on the
+components this format consumes, not something specific to one importer.
 
 \section{Open questions, deferred rather than silently resolved}
 

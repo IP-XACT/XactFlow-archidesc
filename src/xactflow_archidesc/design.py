@@ -14,8 +14,9 @@ from xactflow import Library
 # Namespace of the vendor extensions this importer writes.
 XACTFLOW_NAMESPACE = "https://github.com/IP-XACT/XactFlow"
 
-# Instance names end up as HDL instance names, so they must be plain identifiers.
-_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# IP-XACT's naming rule for an instance name (an XML Name in the schema). ":" is also allowed
+# there but left out.
+_INSTANCE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 
 _Direction = ipxact.Direction
 _Mode = ipxact.InterfaceMode
@@ -426,10 +427,10 @@ class Design:
 
     def _check_new_instance_name(self, instance_name: object, call_site: str) -> None:
         _check_type(instance_name, str, "add_ip(): instance name")
-        if not _IDENTIFIER.fullmatch(instance_name):
+        if not _INSTANCE_NAME.fullmatch(instance_name):
             raise ValueError(
-                f"add_ip(): instance name must start with a letter or '_' and contain only "
-                f"letters, digits and '_', got: {instance_name!r}"
+                f"add_ip(): instance name must start with a letter or '_', not a digit, followed by letters, "
+                f"digits, '_', '.' or '-' (IP-XACT naming rule), got: {instance_name!r}"
             )
         earlier = self._instances.get(instance_name)
         if earlier is not None:

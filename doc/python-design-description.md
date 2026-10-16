@@ -24,13 +24,13 @@ What this importer does:
 2. Resolve each IP reference to a real `ipxact.Component` via a `Library` the script
    itself provides.
 3. Build the corresponding `ipxact.Design` object: one `ComponentInstance` per IP
-   instance, one `Interconnection` per bus connection, one `AdHocConnection` per ad hoc
-   connection.
+   instance, one `Interconnection` per bus connection (a `MonitorInterconnection` when one
+   side is a monitor), one `AdHocConnection` per ad hoc connection.
 
 What it deliberately does not do, because `XactFlow` already does it elsewhere:
 
 - **Bus protocol compatibility checking.** `connect_bus()` only matches interfaces by bus
-  definition VLNV and interface mode (see below); it does not check signal-level
+  type and interface mode (see below); it does not check signal-level
   compatibility, that's `xactflow.elaborate()`'s job, via its interconnection-compatibility
   SCR checks, run after this importer hands off the `Design`.
 - **Address conflict checking, memory map validation.** Out of scope for the reasons
@@ -65,8 +65,10 @@ class Design:
 
 Declares one component instance and resolves it immediately, not deferred to `build()`:
 
-- `instance_name` must be unique within the design. A duplicate raises `ValueError`
-  immediately, naming both the new call and the earlier one that already used it.
+- `instance_name` must follow the IP-XACT naming rule: it starts with a letter or `_`,
+  not a digit, followed by letters, digits, `_`, `.` or `-`. It must also be unique within
+  the design. A duplicate raises `ValueError` immediately, naming both the new call and the
+  earlier one that already used it.
 - `vlnv` is resolved against `library` right away. An unresolvable VLNV raises
   `ValueError` at the `add_ip()` call site, not at the end of the script, so a mistake is
   reported on the line that made it.
@@ -132,15 +134,14 @@ plain `IPInstance` (pick one of its bus interfaces automatically) or an
    mirrored initiator, mirrored target with target, and system with mirrored system. A
    monitor interface matches an interface of the mode it monitors. Only initiators and
    targets are picked automatically, the other modes need the exact, named call. There
-   is no need to say
-   which side is the initiator and which is the target: each side's mode is already set
-   on its own component, so this importer reads it instead of asking the script to
-   repeat it.
+   is no need to say which side is the initiator and which is the target: each side's
+   mode is already set on its own component, so this importer reads it instead of asking
+   the script to repeat it.
 3. If exactly one matching pair exists, it is used.
 4. If more than one exists, `connect_bus` raises `ValueError` listing every candidate
    interface name on both sides. The caller must then say exactly which one to use, by
    passing `a.bus("...")`/`b.bus("...")` for at least one side. A multi-port interconnect
-   (several identical target interfaces, one per attached peripheral) will usually hit
+   (several identical initiator interfaces, one per attached peripheral) will usually hit
    this case; it is expected, not an edge case.
 5. If none matches, `ValueError` explains why (no shared bus definition, no opposite mode
    available, or every candidate already used) and lists what bus interfaces are still
@@ -148,7 +149,8 @@ plain `IPInstance` (pick one of its bus interfaces automatically) or an
 
 On success, one `ipxact.Interconnection` is added to the design, with `active_interface`
 set from `a`'s side and `other_active_interfaces=[<b's side>]`. Its name always follows
-the same pattern, `f"{a.name}_to_{b.name}"` (a number is added at the end if that name is
+the same pattern, `<instance a>_to_<instance b>`, built from the two instance names even
+when an interface is named with `.bus(...)` (a number is added at the end if that name is
 already taken, e.g. a second link between the same two instances). Both interfaces are
 now marked used, so a later `connect_bus()` call will not reuse them.
 
@@ -167,8 +169,8 @@ is future work, once that support exists. Until then,
 when either is given, they're recorded as a vendor extension on the *target* side of the
 connection (a target or mirrored initiator interface). A connection with no such side,
 like a system or monitor one, raises `ValueError`. This is the same way IP-XACT
-represents anything the standard doesn't cover and
-isn't modeled here yet. Concretely, something to the effect of:
+represents anything the standard doesn't cover and isn't modeled here yet. Concretely,
+something to the effect of:
 
 ```xml
 <xactflow:addressMapping baseAddr="0x40010000" size="0x1000"/>
@@ -182,9 +184,9 @@ elaborates `DesignConfiguration`/`addressSpace` for real.
 ### `connect(source, target)`
 
 An ad hoc, signal-level connection between exactly two ports, each a `PortRef` (from
-`.port(name)` or the attribute shorthand). Unlike `connect_bus`, this validates immediately
-rather than deferring to `elaborate()`, since the check is cheap and both ports are
-already in hand:
+`.port(name)` or the attribute shorthand). Unlike `connect_bus`, which leaves signal-level
+compatibility to `elaborate()`, `connect` checks the ports itself, since the check is cheap
+and both ports are already in hand:
 
 - Both ports must belong to instances of this design.
 - Directions must be compatible: one `out` and one `in`, or either side `inout`. Two
@@ -203,8 +205,8 @@ wires whole ports to whole ports.
 ### `build() -> ipxact.Design`
 
 Returns the finished `ipxact.Design`: every `add_ip` as a `ComponentInstance` (in call
-order), every `connect_bus` as an `Interconnection`, every `connect` as an
-`AdHocConnection`. It does not check that every bus interface got connected: an
+order), every `connect_bus` as an `Interconnection` (or a `MonitorInterconnection` for a
+monitor), every `connect` as an `AdHocConnection`. It does not check that every bus interface got connected: an
 unconnected optional interface (e.g. an unused debug port) is a legitimate, common
 design, not an error. Completeness is `SCR`'s concern, if and when a rule for it exists,
 not this importer's.
@@ -267,9 +269,8 @@ this format, whether produced by `XactFlow-sv`, another importer, or hand-writte
 IP-XACT, needs `parameterId` and `resolve="user"` set on each parameter meant to be
 overridable this way. One with no `parameterId` cannot be referenced for override at all,
 and one with `resolve="immediate"` cannot be modified through configuration, per the
-standard. This is
-a general requirement on the components this format consumes, not something specific to
-one importer.
+standard. This is a general requirement on the components this format consumes, not
+something specific to one importer.
 
 ## Open questions, deferred rather than silently resolved
 

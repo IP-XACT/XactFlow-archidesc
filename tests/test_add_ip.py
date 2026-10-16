@@ -42,10 +42,10 @@ def test_add_ip_returns_handle_on_resolved_component(design):
 def test_build_has_one_component_instance_per_add_ip_in_call_order(design):
     design.add_ip("uart", UART)
     design.add_ip("cpu", CPU)
-    design.add_ip("uart2", UART)
+    design.add_ip("uart-2.b", UART)  # "-" and "." are allowed by the IP-XACT naming rule
 
     instances = design.build().component_instances
-    assert [i.instance_name for i in instances] == ["uart", "cpu", "uart2"]
+    assert [i.instance_name for i in instances] == ["uart", "cpu", "uart-2.b"]
     assert str(instances[1].component_ref) == CPU
 
 
