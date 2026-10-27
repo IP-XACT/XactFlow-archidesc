@@ -4,7 +4,7 @@ This document specifies a new `XactFlow` `Importer`: a way to describe a design'
 architecture (which IPs it instantiates, how they're wired together over buses, and any
 ad hoc signal connections) as a plain Python script, instead of hand-written IP-XACT XML.
 Running the script produces an `ipxact.Design` object, which the rest of `XactFlow`
-already knows what to do with: `elaborate()` resolves and checks it against a `Library`,
+already knows what to do with: `link()` resolves and checks it against a `Library`,
 and `XactFlow-design` can serialize it back out to a real IP-XACT `design` XML document.
 
 This builds on the design description concept from *IP-XACT-Based SoC Generation: Tools
@@ -31,7 +31,7 @@ What it deliberately does not do, because `XactFlow` already does it elsewhere:
 
 - **Bus protocol compatibility checking.** `connect_bus()` only matches interfaces by bus
   type and interface mode (see below); it does not check signal-level
-  compatibility, that's `xactflow.elaborate()`'s job, via its interconnection-compatibility
+  compatibility, that's `xactflow.link()`'s job, via its interconnection-compatibility
   SCR checks, run after this importer hands off the `Design`.
 - **Address conflict checking, memory map validation.** Out of scope for the reasons
   in [Address mapping](#address-mapping) below.
@@ -89,7 +89,7 @@ Declares one component instance and resolves it immediately, not deferred to `bu
 
   A separate tool, a transformer, does the work later. It takes the `ipxact.Design`,
   applies the transformations its instances ask for, and returns the modified
-  `ipxact.Design`, ready for elaboration. A transformer can be kept private, and can be
+  `ipxact.Design`, ready for linking. A transformer can be kept private, and can be
   turned on or off without changing the design description.
 
 Returns an `IPInstance` handle (see below) used to build bus and ad hoc connections
@@ -163,7 +163,7 @@ connection.
 `base_addr`/`size` are a convenience for the common case: a target sitting at some offset
 on an addressable bus. IP-XACT actually handles this through `addressSpace`/`segment` on
 the initiator side, resolved through a `designConfiguration`, but `XactFlow` doesn't
-elaborate that yet (see the main `XactFlow`
+link that yet (see the main `XactFlow`
 [README](https://github.com/IP-XACT/XactFlow#known-limitations)). Doing this the real way
 is future work, once that support exists. Until then,
 when either is given, they're recorded as a vendor extension on the *target* side of the
@@ -179,13 +179,13 @@ something to the effect of:
 is appended to that interface's `vendor_extensions`. This is a placeholder, not a
 standards-compliant addressing mechanism; anything reading it back needs to know to look
 for it specifically. It should be revisited (and likely replaced) once `XactFlow`
-elaborates `DesignConfiguration`/`addressSpace` for real.
+links `DesignConfiguration`/`addressSpace` for real.
 
 ### `connect(source, target)`
 
 An ad hoc, signal-level connection between exactly two ports, each a `PortRef` (from
 `.port(name)` or the attribute shorthand). Unlike `connect_bus`, which leaves signal-level
-compatibility to `elaborate()`, `connect` checks the ports itself, since the check is cheap
+compatibility to `link()`, `connect` checks the ports itself, since the check is cheap
 and both ports are already in hand:
 
 - Both ports must belong to instances of this design.
@@ -230,7 +230,7 @@ happened inside the script when it constructed its own `Design`.
 ## Worked example
 
 ```python
-from xactflow import Library, elaborate
+from xactflow import Library, link
 from xactflow_archidesc import Design
 
 library = Library.scan("path/to/ip/library")
@@ -249,16 +249,16 @@ design.connect_bus(bus, timer, base_addr=0x4002_0000, size=0x1000)
 design.connect(debug.debug_req_o, cpu.debug_req_i)
 design.connect(cpu.debug_resp_o, debug.debug_resp_i)
 
-elaborated = elaborate(design.build(), library)
+linked = link(design.build(), library)
 ```
 
 `design.build()` produces the `ipxact.Design`: 5 `ComponentInstance`s, 3
 `Interconnection`s (`cpu_to_apb_bus`, `apb_bus_to_uart`, `apb_bus_to_timer`, one per
-`connect_bus` call), and 2 `AdHocConnection`s. Passing it straight to `elaborate()` with
+`connect_bus` call), and 2 `AdHocConnection`s. Passing it straight to `link()` with
 the same `library` resolves and checks it exactly as it would a hand-written or
 hand-exported design, all in this one script, with no separate importer step needed.
 Running the same script through `ArchiDescImporter` instead (letting the CLI or another
-tool drive it) does that same `build()` call automatically; elaboration is then up to
+tool drive it) does that same `build()` call automatically; linking is then up to
 whatever calls the importer, not shown here.
 
 ## Requirement on imported components
@@ -278,11 +278,11 @@ Things this first version leaves open, on purpose:
 
 - **Hierarchical design description.** A sub-design instantiated as a component inside a
   bigger one is not addressed here; this format currently describes exactly one flat
-  design. `XactFlow`'s own elaborator doesn't recurse into nested designs yet either
+  design. `XactFlow`'s own linker doesn't recurse into nested designs yet either
   (see its README's "No multi-level design hierarchy" limitation), so there is nothing
   downstream to hand a hierarchical result to yet regardless.
 - **Address mapping**, as above: a real system, not a vendor-extension placeholder, once
-  `XactFlow` elaborates `DesignConfiguration`/`addressSpace`.
+  `XactFlow` links `DesignConfiguration`/`addressSpace`.
 - **Protocol bridges** (e.g. an APB-to-OBI adapter between two incompatible bus
   segments): not addressed. `connect_bus` either finds a matching pair or fails; nothing
   here automatically adds a bridge component. A bridge, if one exists as a real

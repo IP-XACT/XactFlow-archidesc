@@ -1,4 +1,4 @@
-"""The full flow on the worked example: run the script through the importer, elaborate the
+"""The full flow on the worked example: run the script through the importer, link the
 result, export it to an IP-XACT design file, and read that file back."""
 
 from dataclasses import fields, is_dataclass
@@ -6,7 +6,7 @@ from pathlib import Path
 from xml.etree.ElementTree import canonicalize
 
 import ipxact
-from xactflow import elaborate
+from xactflow import link
 from xactflow_design import DesignExporter
 
 from xactflow_archidesc import ArchiDescImporter
@@ -34,7 +34,7 @@ def _canonical(value):
     return value
 
 
-def test_worked_example_imports_elaborates_exports_and_reads_back(library, tmp_path):
+def test_worked_example_imports_links_exports_and_reads_back(library, tmp_path):
     design = ArchiDescImporter().import_(SCRIPT)
 
     assert [i.instance_name for i in design.component_instances] == ["cpu", "uart", "timer", "debug", "bus"]
@@ -44,10 +44,10 @@ def test_worked_example_imports_elaborates_exports_and_reads_back(library, tmp_p
         "cpu_debug_resp_o_to_debug_debug_resp_i",
     ]
 
-    elaborated = elaborate(design, library)
-    assert elaborated.diagnostics == []
-    assert len(elaborated.instances) == 5
-    assert len(elaborated.interconnections) == 3
+    linked = link(design, library)
+    assert linked.diagnostics == []
+    assert len(linked.instances) == 5
+    assert len(linked.interconnections) == 3
 
     DesignExporter().export(design, tmp_path)
     assert _canonical(ipxact.parse_file(tmp_path / "example.xml")) == _canonical(design)

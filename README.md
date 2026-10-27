@@ -7,7 +7,7 @@ built on [`ipxact-compiler`](https://github.com/IP-XACT/ipxact-compiler)'s
 
 IP-XACT `design` files are not made to be handwritten. With this package, a short script lists
 the IP instances, the bus connections between them, and any direct signal connections. The
-importer runs the script and returns the `Design`, which XactFlow's `elaborate()` can then check
+importer runs the script and returns the `Design`, which XactFlow's `link()` can then check
 against the IP-XACT rules.
 
 The full description of the format is in
@@ -89,17 +89,17 @@ xactflow archidesc tests/fixtures/soc.py --then design --output out/
 
 This writes `out/example.xml`, named after the design's VLNV name.
 
-Or as a library, for example to elaborate the design first:
+Or as a library, for example to link the design first:
 
 ```python
 from pathlib import Path
 
-from xactflow import Library, elaborate
+from xactflow import Library, link
 from xactflow_archidesc import ArchiDescImporter
 from xactflow_design import DesignExporter
 
 design = ArchiDescImporter().import_(Path("soc.py"))
-elaborated = elaborate(design, Library.scan("ip"))
+linked = link(design, Library.scan("ip"))
 DesignExporter().export(design, Path("out"))
 ```
 
@@ -130,8 +130,8 @@ that do not depend on where the command is run from. The importer takes no optio
 - `connect_bus` compares the bus VLNV of the two interfaces, but not the parameter values set
   on the bus type (a data width, for example). Comparing them needs XactFlow to evaluate
   those values first. This should be changed in a future update.
-- XactFlow's `elaborate()` does not use the parameter overrides from `add_ip` yet. They are
-  written to the design and exported, but not applied during elaboration.
+- XactFlow's `link()` does not use the parameter overrides from `add_ip` yet. They are
+  written to the design and exported, but not applied during linking.
 - `connect` checks direction only for wire ports. Two transactional or two structured ports
   are connected with no further check, only a mix of the two kinds is refused.
 - `connect` does not compare port widths.
@@ -149,7 +149,7 @@ pytest
 ```
 
 The tests use a small IP library in `tests/fixtures/library`. `tests/test_end_to_end.py` runs
-the example script through the importer, elaborates the result, exports it with
+the example script through the importer, links the result, exports it with
 `xactflow-design` and reads the file back.
 
 ## License

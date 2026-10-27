@@ -67,14 +67,15 @@ def test_add_ip_rejects_unknown_vlnv(design):
 
 
 def test_unknown_vlnv_points_at_library_diagnostics_when_there_are_some(tmp_path):
-    # A bus interface with no mode makes the parser fail, so the library records a diagnostic.
+    # A bus interface with no mode makes the parser fail, so the library records a diagnostic for
+    # the file, plus one for its root, from which nothing was indexed.
     (tmp_path / "broken.xml").write_text(
         '<ipxact:component xmlns:ipxact="http://www.accellera.org/XMLSchema/IPXACT/1685-2022">'
         "<ipxact:busInterfaces><ipxact:busInterface><ipxact:name>b</ipxact:name>"
         "</ipxact:busInterface></ipxact:busInterfaces></ipxact:component>"
     )
 
-    with pytest.raises(ValueError, match="library.diagnostics has 1 entries"):
+    with pytest.raises(ValueError, match="library.diagnostics has 2 entries"):
         Design("example.org:soc:top:1.0", Library.scan(tmp_path)).add_ip("x", "example.org:ip:nope:1.0")
 
 

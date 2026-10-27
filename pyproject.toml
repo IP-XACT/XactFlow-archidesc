@@ -14,8 +14,8 @@ authors = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "xactflow",
-    "ipxact-compiler",
+    "xactflow>=0.2.0",
+    "ipxact-compiler>=0.1.2",
 ]
 keywords = [
     "IP-XACT", "IEEE 1685", "XML", "Compiler",

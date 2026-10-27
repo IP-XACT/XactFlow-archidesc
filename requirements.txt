@@ -1,2 +1,2 @@
-ipxact-compiler
-xactflow
+ipxact-compiler>=0.1.2
+xactflow>=0.2.0
