@@ -62,6 +62,18 @@ def test_script_can_import_a_module_next_to_it(tmp_path):
     assert ArchiDescImporter().import_(script).vlnv.name == "top"
 
 
+def test_scripts_in_two_folders_each_get_their_own_helper_module(tmp_path):
+    scripts = []
+    for name in ("soc_a", "soc_b"):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "helpers.py").write_text(f"TOP = 'example.org:soc:{name}:1.0'\n")
+        scripts.append(folder / "top.py")
+        scripts[-1].write_text("from helpers import TOP\n" + SCRIPT.replace('"example.org:soc:top:1.0"', "TOP"))
+
+    assert [ArchiDescImporter().import_(script).vlnv.name for script in scripts] == ["soc_a", "soc_b"]
+
+
 def test_import_rejects_a_path_that_is_not_a_file(tmp_path):
     with pytest.raises(ValueError, match="is not a file"):
         ArchiDescImporter().import_(tmp_path)
