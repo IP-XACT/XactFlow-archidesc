@@ -127,9 +127,9 @@ that do not depend on where the command is run from. The importer takes no optio
 
 ## Known limitations
 
-- `connect_bus` compares the bus VLNV of the two interfaces, but not the parameter values set
-  on the bus type (a data width, for example). Comparing them needs XactFlow to evaluate
-  those values first. This should be changed in a future update.
+- `connect_bus` compares the bus definitions of the two interfaces, but not the parameter
+  values set on the bus type (a data width, for example). Comparing them needs XactFlow to
+  evaluate those values first. This should be changed in a future update.
 - XactFlow's `link()` does not use the parameter overrides from `add_ip` yet. They are
   written to the design and exported, but not applied during linking.
 - `connect` checks direction only for wire ports. Two transactional or two structured ports

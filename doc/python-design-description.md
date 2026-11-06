@@ -127,9 +127,9 @@ plain `IPInstance` (pick one of its bus interfaces automatically) or an
    passed; otherwise every initiator or target interface on that instance's component
    that an earlier `connect_bus()` call has not already used.
 2. A pair `(interface_a, interface_b)` matches if they share the same bus type, and
-   their `mode`s are opposite. The same bus type means the same bus VLNV
-   (`interface_a.bus_type.vlnv == interface_b.bus_type.vlnv`) and the same parameter
-   values set on it (`bus_type.config_element_values`), compared after evaluation. The
+   their `mode`s are opposite. The same bus type means the same bus definition, or one
+   that `extends` the other, directly or not (SCR 2.2), and the same parameter values set
+   on it (`bus_type.config_element_values`), compared after evaluation. The
    modes that connect are the ones the standard allows: initiator with target or
    mirrored initiator, mirrored target with target, and system with mirrored system of
    the same `group`. A monitor interface matches an interface of the mode it monitors.

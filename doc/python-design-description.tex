@@ -216,10 +216,10 @@ either a plain \code{IPInstance} (pick one of its bus interfaces automatically) 
     \code{bus(name)} was passed; otherwise every initiator or target interface on that
     instance's component that an earlier \code{connect\_bus()} call has not already used.
     \item A pair \code{(interface\_a, interface\_b)} matches if they share the same bus
-    type, and their \code{mode}s are opposite. The same bus type means the same bus VLNV
-    (\code{interface\_a.bus\_type.vlnv == interface\_b.bus\_type.vlnv}) and the same
-    parameter values set on it (\code{bus\_type.config\_element\_values}), compared after
-    evaluation. The modes that connect are the ones the standard allows: initiator with
+    type, and their \code{mode}s are opposite. The same bus type means the same bus
+    definition, or one that \code{extends} the other, directly or not (SCR 2.2), and the
+    same parameter values set on it (\code{bus\_type.config\_element\_values}), compared
+    after evaluation. The modes that connect are the ones the standard allows: initiator with
     target or mirrored initiator, mirrored target with target, and system with mirrored
     system of the same \code{group}. A monitor interface matches an interface of the mode
     it monitors. Only initiators and targets are picked automatically, the other modes

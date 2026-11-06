@@ -159,25 +159,46 @@ def _modes_match(bus_a: ipxact.BusInterface, bus_b: ipxact.BusInterface) -> bool
     return frozenset((bus_a.mode, bus_b.mode)) in _MODE_PAIRS
 
 
-def _can_connect(a: BusInterfaceRef, b: BusInterfaceRef) -> bool:
+def _bus_family(vlnv: ipxact.VLNV, library: Library) -> Set[ipxact.VLNV]:
+    """The bus definition and every one it extends, directly or not."""
+    family = {vlnv}
+    bus_definition = library.get_bus_definition(vlnv)
+    while bus_definition is not None and bus_definition.extends is not None:
+        vlnv = bus_definition.extends.vlnv
+        if vlnv in family:
+            break  # a circular extends chain, link() reports it
+        family.add(vlnv)
+        bus_definition = library.get_bus_definition(vlnv)
+    return family
+
+
+def _same_bus(bus_a: ipxact.BusInterface, bus_b: ipxact.BusInterface, library: Library) -> bool:
+    """The same bus definition, or one that extends the other (SCR 2.2)."""
+    vlnv_a, vlnv_b = bus_a.bus_type.vlnv, bus_b.bus_type.vlnv
+    return vlnv_a in _bus_family(vlnv_b, library) or vlnv_b in _bus_family(vlnv_a, library)
+
+
+def _can_connect(a: BusInterfaceRef, b: BusInterfaceRef, library: Library) -> bool:
     """Same bus type, and modes that can be connected, or a monitor of the other side's mode.
 
     A system and a mirrored-system interface also need the same group (SCR 2.13). Only the bus
-    VLNV is compared for now, not the parameter values set on the bus type.
+    definitions are compared for now, not the parameter values set on the bus type.
     """
     bus_a, bus_b = a.bus_interface, b.bus_interface
-    if bus_a.bus_type.vlnv != bus_b.bus_type.vlnv:
+    if not _same_bus(bus_a, bus_b, library):
         return False
     if _watches(bus_a, bus_b) or _watches(bus_b, bus_a):
         return True
     return _modes_match(bus_a, bus_b) and _system_group(bus_a) == _system_group(bus_b)
 
 
-def _no_match_reason(candidates_a: List[BusInterfaceRef], candidates_b: List[BusInterfaceRef]) -> str:
+def _no_match_reason(
+    candidates_a: List[BusInterfaceRef], candidates_b: List[BusInterfaceRef], library: Library
+) -> str:
     if not candidates_a or not candidates_b:
         return "one side has no free bus interface to use"
     pairs = [(x.bus_interface, y.bus_interface) for x in candidates_a for y in candidates_b]
-    same_bus = [(x, y) for x, y in pairs if x.bus_type.vlnv == y.bus_type.vlnv]
+    same_bus = [(x, y) for x, y in pairs if _same_bus(x, y, library)]
     if not same_bus:
         return "they share no bus type"
     # A pair with the right bus type and modes only fails on the group.
@@ -384,12 +405,11 @@ class Design:
         if instance_a is instance_b:
             raise ValueError(f"{where}: cannot connect an instance to itself")
 
-        pairs = [(x, y) for x in candidates_a for y in candidates_b if _can_connect(x, y)]
+        pairs = [(x, y) for x in candidates_a for y in candidates_b if _can_connect(x, y, self.library)]
         if not pairs:
             tried = ", ".join(map(_describe_bus, candidates_a + candidates_b)) or "nothing"
-            raise ValueError(
-                f"{where}: nothing to connect, {_no_match_reason(candidates_a, candidates_b)}. Tried: {tried}"
-            )
+            reason = _no_match_reason(candidates_a, candidates_b, self.library)
+            raise ValueError(f"{where}: nothing to connect, {reason}. Tried: {tried}")
         if len(pairs) > 1:
             choices = ", ".join(f"{_label(x)} with {_label(y)}" for x, y in pairs)
             raise ValueError(f"{where}: more than one possible pair ({choices}). Pick one with .bus(name)")

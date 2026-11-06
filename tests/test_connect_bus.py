@@ -22,6 +22,7 @@ def ip(design):
         "other": "other_ip",
         "bridge": "bridge",
         "bridge2": "bridge",
+        "ext": "ext_target",
     }
     return {name: design.add_ip(name, f"example.org:ip:{component}:1.0") for name, component in components.items()}
 
@@ -40,6 +41,9 @@ def _sides(interconnection):
         (lambda ip: (ip["ic"].bus("m1"), ip["uart"]), "ic_to_uart", [("ic", "m1"), ("uart", "bus_if")]),
         # Target first: the first argument is still the active interface.
         (lambda ip: (ip["uart"], ip["ic"].bus("m0")), "uart_to_ic", [("uart", "bus_if"), ("ic", "m0")]),
+        # A bus definition connects to one it extends, whichever side it is on.
+        (lambda ip: (ip["cpu"], ip["ext"]), "cpu_to_ext", [("cpu", "bus_if"), ("ext", "bus_if")]),
+        (lambda ip: (ip["ext"], ip["cpu"]), "ext_to_cpu", [("ext", "bus_if"), ("cpu", "bus_if")]),
         # The other modes connect when named.
         (lambda ip: (ip["cpu"], ip["bridge"].bus("mi")), "cpu_to_bridge", [("cpu", "bus_if"), ("bridge", "mi")]),
         (
