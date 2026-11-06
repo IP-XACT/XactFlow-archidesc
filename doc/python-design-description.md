@@ -134,7 +134,8 @@ plain `IPInstance` (pick one of its bus interfaces automatically) or an
    on it (`bus_type.config_element_values`), compared after evaluation. The
    modes that connect are the ones the standard allows: initiator with target or
    mirrored initiator, mirrored target with target, and system with mirrored system of
-   the same `group`. A monitor interface matches an interface of the mode it monitors.
+   the same `group`. A monitor interface matches an interface of the mode it monitors,
+   of the same `group` when it monitors a system or mirrored-system interface.
    Only initiators and targets are picked automatically, the other modes need the exact,
    named call. There is no need to say which side is the initiator and which is the
    target: each side's mode is already set on its own component, so this importer reads

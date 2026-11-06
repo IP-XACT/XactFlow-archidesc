@@ -43,6 +43,9 @@ _AUTO_MODES = {_Mode.INITIATOR, _Mode.TARGET}
 # The modes that act as the target of a connection, where the address mapping goes.
 _TARGET_SIDE_MODES = {_Mode.TARGET, _Mode.MIRRORED_INITIATOR}
 
+# The modes that belong to a system group.
+_SYSTEM_MODES = {_Mode.SYSTEM, _Mode.MIRRORED_SYSTEM}
+
 
 def _find(items: Sequence[Any], name: str, owner: str, kind: str) -> Any:
     """Return the item called name, or raise ValueError listing the names that do exist."""
@@ -152,16 +155,24 @@ def _watches(monitor: ipxact.BusInterface, other: ipxact.BusInterface) -> bool:
 
 
 def _system_group(bus: ipxact.BusInterface) -> Optional[str]:
-    """The group of a system or mirrored-system interface, None for any other mode."""
+    """The group of a system or mirrored-system interface, or of a monitor watching one.
+
+    None for any other interface.
+    """
+    if bus.monitor is not None and bus.monitor.interface_mode in _SYSTEM_MODES:
+        return bus.monitor.group
     system = bus.system or bus.mirrored_system
     return system.group if system is not None else None
 
 
 def _modes_match(bus_a: ipxact.BusInterface, bus_b: ipxact.BusInterface) -> bool:
+    """Modes that can be connected, or a monitor of the other side's mode."""
+    if _watches(bus_a, bus_b) or _watches(bus_b, bus_a):
+        return True
     return frozenset((bus_a.mode, bus_b.mode)) in _MODE_PAIRS
 
 
-def _bus_family(vlnv: ipxact.VLNV, library: Library) -> Set[ipxact.VLNV]:
+def _bus_family(vlnv: ipxact.VLNV, library: Library) -> FrozenSet[ipxact.VLNV]:
     """The bus definition and every one it extends, directly or not."""
     family = {vlnv}
     bus_definition = library.get_bus_definition(vlnv)
@@ -171,42 +182,15 @@ def _bus_family(vlnv: ipxact.VLNV, library: Library) -> Set[ipxact.VLNV]:
             break  # a circular extends chain, link() reports it
         family.add(vlnv)
         bus_definition = library.get_bus_definition(vlnv)
-    return family
+    return frozenset(family)
 
 
-def _same_bus(bus_a: ipxact.BusInterface, bus_b: ipxact.BusInterface, library: Library) -> bool:
-    """The same bus definition, or one that extends the other (SCR 2.2)."""
-    vlnv_a, vlnv_b = bus_a.bus_type.vlnv, bus_b.bus_type.vlnv
-    return vlnv_a in _bus_family(vlnv_b, library) or vlnv_b in _bus_family(vlnv_a, library)
-
-
-def _can_connect(a: BusInterfaceRef, b: BusInterfaceRef, library: Library) -> bool:
-    """Same bus type, and modes that can be connected, or a monitor of the other side's mode.
-
-    A system and a mirrored-system interface also need the same group (SCR 2.13). Only the bus
-    definitions are compared for now, not the parameter values set on the bus type.
-    """
-    bus_a, bus_b = a.bus_interface, b.bus_interface
-    if not _same_bus(bus_a, bus_b, library):
-        return False
-    if _watches(bus_a, bus_b) or _watches(bus_b, bus_a):
-        return True
-    return _modes_match(bus_a, bus_b) and _system_group(bus_a) == _system_group(bus_b)
-
-
-def _no_match_reason(
-    candidates_a: List[BusInterfaceRef], candidates_b: List[BusInterfaceRef], library: Library
-) -> str:
-    if not candidates_a or not candidates_b:
-        return "one side has no free bus interface to use"
-    pairs = [(x.bus_interface, y.bus_interface) for x in candidates_a for y in candidates_b]
-    same_bus = [(x, y) for x, y in pairs if _same_bus(x, y, library)]
-    if not same_bus:
-        return "they share no bus type"
-    # A pair with the right bus type and modes only fails on the group.
-    if any(_modes_match(x, y) for x, y in same_bus):
-        return "their system groups differ"
-    return "their modes cannot be connected"
+# Why connect_bus() found nothing to connect, from the least to the most specific: the reason
+# shown is the most specific one any pair got.
+_NO_BUS_TYPE = "they share no bus type"
+_NO_MODES = "their modes cannot be connected"
+_NO_GROUP = "their system groups differ"
+_PROBLEMS = (_NO_BUS_TYPE, _NO_MODES, _NO_GROUP)
 
 
 def _active_interface(ref: BusInterfaceRef, address_mapping: List[str]) -> ipxact.ActiveInterface:
@@ -339,6 +323,7 @@ class Design:
         # name of the connection using it.
         self._driven_ports: Dict[PortRef, str] = {}
         self._used_bus_interfaces: Dict[BusInterfaceRef, str] = {}
+        self._bus_families: Dict[ipxact.VLNV, FrozenSet[ipxact.VLNV]] = {}
 
     def add_ip(
         self,
@@ -414,10 +399,11 @@ class Design:
         if instance_a is instance_b:
             raise ValueError(f"{where}: cannot connect an instance to itself")
 
-        pairs = [(x, y) for x in candidates_a for y in candidates_b if _can_connect(x, y, self.library)]
+        problems = {(x, y): self._connect_problem(x, y) for x in candidates_a for y in candidates_b}
+        pairs = [pair for pair, problem in problems.items() if problem is None]
         if not pairs:
             tried = ", ".join(map(_describe_bus, candidates_a + candidates_b)) or "nothing"
-            reason = _no_match_reason(candidates_a, candidates_b, self.library)
+            reason = max(problems.values(), key=_PROBLEMS.index) if problems else "one side has no free bus interface to use"
             raise ValueError(f"{where}: nothing to connect, {reason}. Tried: {tried}")
         if len(pairs) > 1:
             choices = ", ".join(f"{_label(x)} with {_label(y)}" for x, y in pairs)
@@ -463,6 +449,30 @@ class Design:
             monitor_interconnections=list(self._monitor_interconnections),
             ad_hoc_connections=list(self._ad_hoc_connections.values()),
         )
+
+    def _connect_problem(self, a: BusInterfaceRef, b: BusInterfaceRef) -> Optional[str]:
+        """Return why the two bus interfaces cannot be connected, or None if they can.
+
+        They need the same bus definition, or one that extends the other (SCR 2.2), and modes
+        that can be connected. A system interface, a mirrored-system interface and a monitor of
+        either also need the same group (SCR 2.13, 4.4). Only the bus definitions are compared
+        for now, not the parameter values set on the bus type.
+        """
+        bus_a, bus_b = a.bus_interface, b.bus_interface
+        family_a, family_b = self._bus_family(bus_a), self._bus_family(bus_b)
+        if bus_a.bus_type.vlnv not in family_b and bus_b.bus_type.vlnv not in family_a:
+            return _NO_BUS_TYPE
+        if not _modes_match(bus_a, bus_b):
+            return _NO_MODES
+        if _system_group(bus_a) != _system_group(bus_b):
+            return _NO_GROUP
+        return None
+
+    def _bus_family(self, bus: ipxact.BusInterface) -> FrozenSet[ipxact.VLNV]:
+        vlnv = bus.bus_type.vlnv
+        if vlnv not in self._bus_families:
+            self._bus_families[vlnv] = _bus_family(vlnv, self.library)
+        return self._bus_families[vlnv]
 
     def _new_connection_name(self, base: str) -> str:
         """Return base, or base with a number added if a connection already has that name."""

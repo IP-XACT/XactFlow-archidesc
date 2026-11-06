@@ -43,6 +43,20 @@
       <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
       <ipxact:monitor interfaceMode="target"/>
     </ipxact:busInterface>
+    <ipxact:busInterface>
+      <ipxact:name>mon_sys_g</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+      <ipxact:monitor interfaceMode="system">
+        <ipxact:group>g</ipxact:group>
+      </ipxact:monitor>
+    </ipxact:busInterface>
+    <ipxact:busInterface>
+      <ipxact:name>mon_sys_h</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+      <ipxact:monitor interfaceMode="system">
+        <ipxact:group>h</ipxact:group>
+      </ipxact:monitor>
+    </ipxact:busInterface>
   </ipxact:busInterfaces>
 
   <ipxact:model>

@@ -68,6 +68,7 @@ def test_connect_bus_adds_one_interconnection(design, ip, connect, name, sides):
         (lambda ip: (ip["uart"], ip["timer"]), ValueError, "their modes cannot be connected"),
         (lambda ip: (ip["ic"].bus("m0"), ip["other"]), ValueError, "they share no bus type"),
         (lambda ip: (ip["bridge"].bus("sys"), ip["bridge2"].bus("msys_h")), ValueError, "their system groups differ"),
+        (lambda ip: (ip["bridge"].bus("mon_sys_h"), ip["bridge2"].bus("sys")), ValueError, "their system groups differ"),
         (lambda ip: (ip["ic"].bus("m0"), ip["ic"]), ValueError, "cannot connect an instance to itself"),
         # Other modes are never picked by themselves.
         (lambda ip: (ip["cpu"], ip["bridge"]), ValueError, "one side has no free bus interface"),
@@ -150,6 +151,14 @@ def test_monitor_can_watch_an_interface_already_connected(design, ip):
     assert (watched.component_instance_ref, watched.bus_ref) == ("uart", "bus_if")
     assert [(m.component_instance_ref, m.bus_ref) for m in monitor.monitor_interfaces] == [("bridge", "mon")]
     assert len(built.interconnections) == 1
+
+
+def test_monitor_of_a_system_interface_watches_one_of_the_same_group(design, ip):
+    design.connect_bus(ip["bridge"].bus("mon_sys_g"), ip["bridge2"].bus("sys"))
+
+    [monitor] = design.build().monitor_interconnections
+    watched = monitor.monitored_active_interface
+    assert (watched.component_instance_ref, watched.bus_ref) == ("bridge2", "sys")
 
 
 def test_connect_and_connect_bus_never_give_two_connections_the_same_name(design, ip):
