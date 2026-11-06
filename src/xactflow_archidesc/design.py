@@ -149,22 +149,41 @@ def _watches(monitor: ipxact.BusInterface, other: ipxact.BusInterface) -> bool:
     return monitor.mode == _Mode.MONITOR and monitor.monitor.interface_mode == other.mode
 
 
+def _system_group(bus: ipxact.BusInterface) -> Optional[str]:
+    """The group of a system or mirrored-system interface, None for any other mode."""
+    system = bus.system or bus.mirrored_system
+    return system.group if system is not None else None
+
+
+def _modes_match(bus_a: ipxact.BusInterface, bus_b: ipxact.BusInterface) -> bool:
+    return frozenset((bus_a.mode, bus_b.mode)) in _MODE_PAIRS
+
+
 def _can_connect(a: BusInterfaceRef, b: BusInterfaceRef) -> bool:
     """Same bus type, and modes that can be connected, or a monitor of the other side's mode.
 
-    Only the bus VLNV is compared for now, not the parameter values set on the bus type.
+    A system and a mirrored-system interface also need the same group (SCR 2.13). Only the bus
+    VLNV is compared for now, not the parameter values set on the bus type.
     """
     bus_a, bus_b = a.bus_interface, b.bus_interface
     if bus_a.bus_type.vlnv != bus_b.bus_type.vlnv:
         return False
-    return frozenset((bus_a.mode, bus_b.mode)) in _MODE_PAIRS or _watches(bus_a, bus_b) or _watches(bus_b, bus_a)
+    if _watches(bus_a, bus_b) or _watches(bus_b, bus_a):
+        return True
+    return _modes_match(bus_a, bus_b) and _system_group(bus_a) == _system_group(bus_b)
 
 
 def _no_match_reason(candidates_a: List[BusInterfaceRef], candidates_b: List[BusInterfaceRef]) -> str:
     if not candidates_a or not candidates_b:
         return "one side has no free bus interface to use"
-    same_bus = any(x.bus_interface.bus_type.vlnv == y.bus_interface.bus_type.vlnv for x in candidates_a for y in candidates_b)
-    return "their modes cannot be connected" if same_bus else "they share no bus type"
+    pairs = [(x.bus_interface, y.bus_interface) for x in candidates_a for y in candidates_b]
+    same_bus = [(x, y) for x, y in pairs if x.bus_type.vlnv == y.bus_type.vlnv]
+    if not same_bus:
+        return "they share no bus type"
+    # A pair with the right bus type and modes only fails on the group.
+    if any(_modes_match(x, y) for x, y in same_bus):
+        return "their system groups differ"
+    return "their modes cannot be connected"
 
 
 def _active_interface(ref: BusInterfaceRef, address_mapping: List[str]) -> ipxact.ActiveInterface:

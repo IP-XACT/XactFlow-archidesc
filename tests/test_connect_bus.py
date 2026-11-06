@@ -63,6 +63,7 @@ def test_connect_bus_adds_one_interconnection(design, ip, connect, name, sides):
         (lambda ip: (ip["ic"], ip["uart"]), ValueError, "ic.m0 with uart.bus_if, ic.m1 with uart.bus_if"),
         (lambda ip: (ip["uart"], ip["timer"]), ValueError, "their modes cannot be connected"),
         (lambda ip: (ip["ic"].bus("m0"), ip["other"]), ValueError, "they share no bus type"),
+        (lambda ip: (ip["bridge"].bus("sys"), ip["bridge2"].bus("msys_h")), ValueError, "their system groups differ"),
         (lambda ip: (ip["ic"].bus("m0"), ip["ic"]), ValueError, "cannot connect an instance to itself"),
         # Other modes are never picked by themselves.
         (lambda ip: (ip["cpu"], ip["bridge"]), ValueError, "one side has no free bus interface"),

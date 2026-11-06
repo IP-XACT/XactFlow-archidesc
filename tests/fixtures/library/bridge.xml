@@ -32,6 +32,13 @@
       </ipxact:mirroredSystem>
     </ipxact:busInterface>
     <ipxact:busInterface>
+      <ipxact:name>msys_h</ipxact:name>
+      <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
+      <ipxact:mirroredSystem>
+        <ipxact:group>h</ipxact:group>
+      </ipxact:mirroredSystem>
+    </ipxact:busInterface>
+    <ipxact:busInterface>
       <ipxact:name>mon</ipxact:name>
       <ipxact:busType vendor="example.org" library="bus" name="simplebus" version="1.0"/>
       <ipxact:monitor interfaceMode="target"/>
