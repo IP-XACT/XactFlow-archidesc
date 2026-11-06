@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 import ipxact
@@ -72,6 +73,31 @@ def test_scripts_in_two_folders_each_get_their_own_helper_module(tmp_path):
         scripts[-1].write_text("from helpers import TOP\n" + SCRIPT.replace('"example.org:soc:top:1.0"', "TOP"))
 
     assert [ArchiDescImporter().import_(script).vlnv.name for script in scripts] == ["soc_a", "soc_b"]
+
+
+def test_a_package_installed_below_the_script_folder_stays_imported(tmp_path, monkeypatch):
+    # A .venv next to the script: its packages are found through sys.path, not the script folder.
+    site = tmp_path / ".venv" / "site"
+    (site / "archidesc_test_pkg" / "sub").mkdir(parents=True)
+    (site / "archidesc_test_pkg" / "__init__.py").write_text("")
+    (site / "archidesc_test_pkg" / "sub" / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(site))
+    for name in ("archidesc_test_pkg", "archidesc_test_pkg.sub"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    script = tmp_path / "top.py"
+    script.write_text("import archidesc_test_pkg.sub\n" + SCRIPT)
+
+    ArchiDescImporter().import_(script)
+
+    assert "archidesc_test_pkg.sub" in sys.modules
+
+
+def test_the_script_error_is_raised_even_if_the_script_left_sys_path(tmp_path):
+    script = tmp_path / "top.py"
+    script.write_text("import os, sys\nsys.path.remove(os.path.dirname(__file__))\nraise RuntimeError('boom')\n")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        ArchiDescImporter().import_(script)
 
 
 def test_import_rejects_a_path_that_is_not_a_file(tmp_path):

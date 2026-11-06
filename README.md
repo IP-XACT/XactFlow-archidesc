@@ -104,8 +104,10 @@ DesignExporter().export(design, Path("out"))
 ```
 
 The script runs like `python soc.py` would: a helper module next to it can be imported, and a
-relative path in it is read from the current folder. `Path(__file__).parent` gives paths
-that do not depend on where the command is run from. The importer takes no options.
+relative path in it is read from the current folder. Helper modules are forgotten once the
+script has run, so scripts in different folders can each have their own `helpers.py`.
+`Path(__file__).parent` gives paths that do not depend on where the command is run from. The
+importer takes no options.
 
 ## Design notes
 
@@ -146,11 +148,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt -e .
 pytest
+mypy src
 ```
 
 The tests use a small IP library in `tests/fixtures/library`. `tests/test_end_to_end.py` runs
 the example script through the importer, links the result, exports it with
-`xactflow-design` and reads the file back.
+`xactflow-design` and reads the file back. `mypy src` checks the type hints, since the
+package ships `py.typed`. CI runs both.
 
 ## License
 

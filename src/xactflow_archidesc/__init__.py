@@ -26,13 +26,15 @@ class ArchiDescImporter(Importer):
         source_path = Path(source_path)
         if not source_path.is_file():
             raise ValueError(f"{source_path} is not a file")
+        folder = str(source_path.parent)
         modules_before = set(sys.modules)
-        sys.path.insert(0, str(source_path.parent))
+        sys.path.insert(0, folder)
         try:
             namespace = runpy.run_path(str(source_path))
         finally:
-            sys.path.remove(str(source_path.parent))
             _forget_modules_from(source_path.parent, modules_before)
+            if folder in sys.path:  # the script may have removed it itself
+                sys.path.remove(folder)
         if "design" not in namespace:
             raise ValueError(f"{source_path} must define a module-level variable 'design'")
         design = namespace["design"]
@@ -48,12 +50,18 @@ def _forget_modules_from(folder: Path, modules_before: Set[str]) -> None:
     """Remove from sys.modules the modules the script imported from its own folder.
 
     Otherwise a later script in another folder importing a module of the same name would get
-    this one.
+    this one. Only the modules found through the folder itself are removed: <name>.py next to
+    the script, or a <name>/ package there. A package installed below the folder (in a .venv,
+    for example) is left alone.
     """
     folder = folder.resolve()
     for name in set(sys.modules) - modules_before:
         file = getattr(sys.modules[name], "__file__", None)
-        if file is not None and Path(file).resolve().is_relative_to(folder):
+        if file is None:
+            continue
+        top = name.partition(".")[0]
+        path = Path(file).resolve()
+        if path == folder / f"{top}.py" or path.is_relative_to(folder / top):
             del sys.modules[name]
 
 
