@@ -131,12 +131,12 @@ plain `IPInstance` (pick one of its bus interfaces automatically) or an
    (`interface_a.bus_type.vlnv == interface_b.bus_type.vlnv`) and the same parameter
    values set on it (`bus_type.config_element_values`), compared after evaluation. The
    modes that connect are the ones the standard allows: initiator with target or
-   mirrored initiator, mirrored target with target, and system with mirrored system. A
-   monitor interface matches an interface of the mode it monitors. Only initiators and
-   targets are picked automatically, the other modes need the exact, named call. There
-   is no need to say which side is the initiator and which is the target: each side's
-   mode is already set on its own component, so this importer reads it instead of asking
-   the script to repeat it.
+   mirrored initiator, mirrored target with target, and system with mirrored system of
+   the same `group`. A monitor interface matches an interface of the mode it monitors.
+   Only initiators and targets are picked automatically, the other modes need the exact,
+   named call. There is no need to say which side is the initiator and which is the
+   target: each side's mode is already set on its own component, so this importer reads
+   it instead of asking the script to repeat it.
 3. If exactly one matching pair exists, it is used.
 4. If more than one exists, `connect_bus` raises `ValueError` listing every candidate
    interface name on both sides. The caller must then say exactly which one to use, by
@@ -144,8 +144,8 @@ plain `IPInstance` (pick one of its bus interfaces automatically) or an
    (several identical initiator interfaces, one per attached peripheral) will usually hit
    this case; it is expected, not an edge case.
 5. If none matches, `ValueError` explains why (no shared bus definition, no opposite mode
-   available, or every candidate already used) and lists what bus interfaces are still
-   free on each side.
+   available, different system groups, or every candidate already used) and lists what
+   bus interfaces are still free on each side.
 
 On success, one `ipxact.Interconnection` is added to the design, with `active_interface`
 set from `a`'s side and `other_active_interfaces=[<b's side>]`. Its name always follows
@@ -163,7 +163,7 @@ connection.
 `base_addr`/`size` are a convenience for the common case: a target sitting at some offset
 on an addressable bus. IP-XACT actually handles this through `addressSpace`/`segment` on
 the initiator side, resolved through a `designConfiguration`, but `XactFlow` doesn't
-link that yet (see the main `XactFlow`
+apply that yet (see the main `XactFlow`
 [README](https://github.com/IP-XACT/XactFlow#known-limitations)). Doing this the real way
 is future work, once that support exists. Until then,
 when either is given, they're recorded as a vendor extension on the *target* side of the
@@ -179,7 +179,7 @@ something to the effect of:
 is appended to that interface's `vendor_extensions`. This is a placeholder, not a
 standards-compliant addressing mechanism; anything reading it back needs to know to look
 for it specifically. It should be revisited (and likely replaced) once `XactFlow`
-links `DesignConfiguration`/`addressSpace` for real.
+applies `DesignConfiguration`/`addressSpace` for real.
 
 ### `connect(source, target)`
 
@@ -282,7 +282,7 @@ Things this first version leaves open, on purpose:
   (see its README's "No multi-level design hierarchy" limitation), so there is nothing
   downstream to hand a hierarchical result to yet regardless.
 - **Address mapping**, as above: a real system, not a vendor-extension placeholder, once
-  `XactFlow` links `DesignConfiguration`/`addressSpace`.
+  `XactFlow` applies `DesignConfiguration`/`addressSpace`.
 - **Protocol bridges** (e.g. an APB-to-OBI adapter between two incompatible bus
   segments): not addressed. `connect_bus` either finds a matching pair or fails; nothing
   here automatically adds a bridge component. A bridge, if one exists as a real
