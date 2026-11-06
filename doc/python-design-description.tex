@@ -163,6 +163,8 @@ Declares one component instance and resolves it immediately, not deferred to
         This is a defect in the referenced \emph{component} file, not something this importer
         can paper over (see Section~\ref{sec:relationship-sv} for why this matters in
         practice).
+        \item Empty or blank value, or a float that is not finite (\code{nan}, \code{inf}):
+        \code{ValueError}, since it is not a usable expression.
         \item Otherwise, the override is recorded against that parameter's
         \code{parameterId}.
     \end{itemize}

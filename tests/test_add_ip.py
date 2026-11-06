@@ -88,6 +88,10 @@ def test_unknown_vlnv_points_at_library_diagnostics_when_there_are_some(tmp_path
         (("x", "example.org:bus:simplebus:1.0"), {}, ValueError),  # a bus definition, not a component
         (("x", UART), {"parameters": [("BAUDRATE", 1)]}, TypeError),
         (("x", UART), {"parameters": {"BAUDRATE": None}}, TypeError),
+        (("x", UART), {"parameters": {"BAUDRATE": ""}}, ValueError),
+        (("x", UART), {"parameters": {"BAUDRATE": "  "}}, ValueError),
+        (("x", UART), {"parameters": {"BAUDRATE": float("nan")}}, ValueError),
+        (("x", UART), {"parameters": {"BAUDRATE": float("inf")}}, ValueError),
         (("x", UART), {"transforms": "tmrg"}, TypeError),
     ],
 )

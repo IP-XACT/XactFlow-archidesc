@@ -82,6 +82,8 @@ Declares one component instance and resolves it immediately, not deferred to `bu
     default) cannot be modified through configuration. This is a defect in the
     referenced *component* file, not something this importer can paper over (see
     [Requirement on imported components](#requirement-on-imported-components)).
+  - Empty or blank value, or a float that is not finite (`nan`, `inf`): `ValueError`,
+    since it is not a usable expression.
   - Otherwise, the override is recorded against that parameter's `parameterId`.
 - `transforms` names zero or more transformations to apply to this instance, radiation
   hardening being one example. This importer does not apply them. It only records the

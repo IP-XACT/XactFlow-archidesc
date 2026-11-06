@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import sys
 from dataclasses import asdict, dataclass, field
@@ -272,6 +273,10 @@ def _expression(value: object, what: str) -> ipxact.Expression:
     """Write a Python value as an IP-XACT expression."""
     if isinstance(value, bool):  # before int, since bool is an int
         return ipxact.Expression("true" if value else "false")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"{what} must be a finite number, got: {value!r}")
+    if isinstance(value, str) and not value.strip():
+        raise ValueError(f"{what} must not be empty, got: {value!r}")
     if isinstance(value, (int, float, str)):
         return ipxact.Expression(str(value))
     raise TypeError(f"{what} must be an int, float, bool or str, got {type(value).__name__}: {value!r}")
