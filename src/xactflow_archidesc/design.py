@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import inspect
 import re
+import sys
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple, Type, TypeVar, Union
 from xml.sax.saxutils import quoteattr
 
 import ipxact
@@ -123,7 +123,7 @@ def _port_problem(source: PortRef, target: PortRef) -> Optional[str]:
     kinds = (_port_kind(source), _port_kind(target))
     if kinds[0] != kinds[1]:
         return f"cannot connect a {kinds[0]} port to a {kinds[1]} port"
-    if kinds[0] != "wire":
+    if source.port.wire is None or target.port.wire is None:
         return None
     directions = (source.port.wire.direction, target.port.wire.direction)
     if _Direction.PHANTOM in directions:
@@ -146,7 +146,8 @@ def _label(side: object) -> str:
 
 
 def _watches(monitor: ipxact.BusInterface, other: ipxact.BusInterface) -> bool:
-    return monitor.mode == _Mode.MONITOR and monitor.monitor.interface_mode == other.mode
+    watched = monitor.monitor
+    return monitor.mode == _Mode.MONITOR and watched is not None and watched.interface_mode == other.mode
 
 
 def _system_group(bus: ipxact.BusInterface) -> Optional[str]:
@@ -230,7 +231,7 @@ class _InstanceRecord:
 
 def _caller_site() -> str:
     """Return "file:line" of the code that called the public Design method."""
-    caller = inspect.currentframe().f_back.f_back  # skip _caller_site itself, then the Design method
+    caller = sys._getframe(2)  # skip _caller_site itself, then the Design method
     return f"{caller.f_code.co_filename}:{caller.f_lineno}"
 
 
@@ -250,15 +251,18 @@ def _address_mapping_extensions(where: str, base_addr: Optional[int], size: Opti
     return [f'<xactflow:addressMapping xmlns:xactflow="{XACTFLOW_NAMESPACE}"{attributes}/>']
 
 
-def _check_type(value: object, expected: type, what: str) -> None:
-    """Raise TypeError if value is not of the expected type."""
+_T = TypeVar("_T")
+
+
+def _check_type(value: object, expected: Type[_T], what: str) -> _T:
+    """Return value, or raise TypeError if it is not of the expected type."""
     if not isinstance(value, expected):
         raise TypeError(f"{what} must be a {expected.__name__}, got {type(value).__name__}: {value!r}")
+    return value
 
 
 def _parse_vlnv(value: object, what: str) -> ipxact.VLNV:
-    _check_type(value, str, what)
-    fields = value.split(":")
+    fields = _check_type(value, str, what).split(":")
     if len(fields) != 4 or not all(fields):
         raise ValueError(f"{what} must be a 'vendor:library:name:version' string, got: {value!r}")
     return ipxact.VLNV(*fields)
@@ -465,7 +469,7 @@ class Design:
         return name
 
     def _check_new_instance_name(self, instance_name: object, call_site: str) -> None:
-        _check_type(instance_name, str, "add_ip(): instance name")
+        instance_name = _check_type(instance_name, str, "add_ip(): instance name")
         if not _INSTANCE_NAME.fullmatch(instance_name):
             raise ValueError(
                 f"add_ip(): instance name must start with a letter or '_', not a digit, followed by letters, "
