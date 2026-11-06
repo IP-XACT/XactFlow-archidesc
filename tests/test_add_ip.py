@@ -105,7 +105,7 @@ def test_add_ip_records_parameter_override_by_parameter_id(design, value, expres
     design.add_ip("uart", UART, parameters={"BAUDRATE": value})
 
     ref = design.build().component_instances[0].component_ref
-    assert ref.config_element_values == {"BAUDRATE": expression}
+    assert ref.config_element_values == {"BAUDRATE": ipxact.Expression(expression)}
 
 
 def test_add_ip_rejects_unknown_parameter_and_lists_available_ones(design):

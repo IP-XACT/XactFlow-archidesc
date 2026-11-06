@@ -14,8 +14,8 @@ authors = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "xactflow>=0.2.0",
-    "ipxact-compiler>=0.1.2",
+    "xactflow>=0.3.0",
+    "ipxact-compiler>=0.2.0",
 ]
 keywords = [
     "IP-XACT", "IEEE 1685", "XML", "Compiler",
@@ -42,7 +42,7 @@ Issues = "https://github.com/IP-XACT/XactFlow-archidesc/issues"
 dev = [
     "pytest",
     # For the end-to-end test, exporting to XML for visual verification.
-    "xactflow-design",
+    "xactflow-design>=0.2.0",
 ]
 
 [project.entry-points."xactflow.importers"]

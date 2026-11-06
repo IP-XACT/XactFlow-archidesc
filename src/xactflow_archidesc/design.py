@@ -224,18 +224,18 @@ def _parse_vlnv(value: object, what: str) -> ipxact.VLNV:
     return ipxact.VLNV(*fields)
 
 
-def _expression(value: object, what: str) -> str:
-    """Write a Python value as an IP-XACT expression string."""
+def _expression(value: object, what: str) -> ipxact.Expression:
+    """Write a Python value as an IP-XACT expression."""
     if isinstance(value, bool):  # before int, since bool is an int
-        return "true" if value else "false"
+        return ipxact.Expression("true" if value else "false")
     if isinstance(value, (int, float, str)):
-        return str(value)
+        return ipxact.Expression(str(value))
     raise TypeError(f"{what} must be an int, float, bool or str, got {type(value).__name__}: {value!r}")
 
 
 def _config_element_values(
     where: str, component: ipxact.Component, parameters: Optional[Dict[str, object]]
-) -> Dict[str, str]:
+) -> Dict[str, ipxact.Expression]:
     """Turn add_ip()'s parameter overrides into configurableElementValues, keyed by parameterId.
 
     Only a parameter with resolve="user" can be overridden. The standard says an "immediate"

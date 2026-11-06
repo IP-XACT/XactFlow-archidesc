@@ -87,7 +87,7 @@ pip install -e ".[dev]"
 xactflow archidesc tests/fixtures/soc.py --then design --output out/
 ```
 
-This writes `out/example.xml`, named after the design's VLNV name.
+This writes `out/example.org_soc_example_0.1.xml`, named after the design's VLNV.
 
 Or as a library, for example to link the design first:
 

@@ -50,4 +50,4 @@ def test_worked_example_imports_links_exports_and_reads_back(library, tmp_path):
     assert len(linked.interconnections) == 3
 
     DesignExporter().export(design, tmp_path)
-    assert _canonical(ipxact.parse_file(tmp_path / "example.xml")) == _canonical(design)
+    assert _canonical(ipxact.parse_file(tmp_path / "example.org_soc_example_0.1.xml")) == _canonical(design)
