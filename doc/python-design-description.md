@@ -240,17 +240,20 @@ cpu   = design.add_ip("cpu",   "openhwgroup:core:ibex:1.0", transforms=["tmrg"])
 uart  = design.add_ip("uart",  "cern.ch:ip:uart:1.0", parameters={"BAUDRATE": 115200})
 timer = design.add_ip("timer", "pulp:ip:timer:1.0")
 debug = design.add_ip("debug", "cern.ch:ip:debug_module:1.0")
-bus   = design.add_ip("apb_bus", "cern.socgen:apb_rt:0.1.0")
+bus   = design.add_ip("apb_bus", "cern.socgen:ip:apb_rt:0.1.0")
 
-design.connect_bus(cpu, bus)
-design.connect_bus(bus, uart,  base_addr=0x4001_0000, size=0x1000)
-design.connect_bus(bus, timer, base_addr=0x4002_0000, size=0x1000)
+design.connect_bus(cpu, bus.bus("s0"))
+design.connect_bus(bus.bus("m0"), uart,  base_addr=0x4001_0000, size=0x1000)
+design.connect_bus(bus.bus("m1"), timer, base_addr=0x4002_0000, size=0x1000)
 
 design.connect(debug.debug_req_o, cpu.debug_req_i)
 design.connect(cpu.debug_resp_o, debug.debug_resp_i)
 
 linked = link(design.build(), library)
 ```
+
+The interconnect has several identical ports on each side, so each `connect_bus` call
+names the one to use with `.bus(name)`.
 
 `design.build()` produces the `ipxact.Design`: 5 `ComponentInstance`s, 3
 `Interconnection`s (`cpu_to_apb_bus`, `apb_bus_to_uart`, `apb_bus_to_timer`, one per
