@@ -7,8 +7,8 @@ built on [`ipxact-compiler`](https://github.com/IP-XACT/ipxact-compiler)'s
 
 IP-XACT `design` files are not made to be handwritten. With this package, a short script lists
 the IP instances, the bus connections between them, and any direct signal connections. The
-importer runs the script and returns the `Design`, which XactFlow's `link()` can then check
-against the IP-XACT rules.
+importer runs the script and adds the `Design` to a XactFlow `Library` as a target, for an
+exporter to write; XactFlow's `link()` can check it against the IP-XACT rules.
 
 The full description of the format is in
 [`doc/python-design-description.md`](doc/python-design-description.md). It describes the tool
@@ -77,30 +77,37 @@ All the details are in [the format description](doc/python-design-description.md
 
 Once installed, the importer registers itself under the `xactflow.importers` entry point group
 as `archidesc`, so it runs as a XactFlow CLI command. With `xactflow-design` installed too,
-`--then` hands the result straight to that exporter. To try it on the example of this repo,
-create a virtual environment and install the package in it first. The `xactflow` command only
-exists inside that environment, so activate it again in each new terminal:
+`--then` hands the library holding the design straight to that exporter. `--lib` adds IP-XACT
+folders to that library, for an exporter that needs the instantiated components. To try it on
+the example of this repo, create a virtual environment and install the package in it first.
+The `xactflow` command only exists inside that environment, so activate it again in each new
+terminal:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-xactflow archidesc tests/fixtures/soc.py --then design --output out/
+xactflow archidesc tests/fixtures/soc.py --lib tests/fixtures/library --then design --output out/
 ```
 
-This writes `out/example.org_soc_example_0.1.xml`, named after the design's VLNV.
+This writes `out/example.org_soc_example_0.1.xml`, named after the design's VLNV. The design is
+regenerated on every run: if `out/` is also given with `--lib`, the new design replaces the one
+read from there instead of being reported as a duplicate VLNV.
 
 Or as a library, for example to link the design first:
 
 ```python
 from pathlib import Path
 
+import ipxact
 from xactflow import Library, link
 from xactflow_archidesc import ArchiDescImporter
 from xactflow_design import DesignExporter
 
-design = ArchiDescImporter().import_(Path("soc.py"))
-linked = link(design, Library.scan("ip"))
-DesignExporter().export(design, Path("out"))
+library = Library.scan("ip")
+ArchiDescImporter().import_(Path("soc.py"), library)
+[design] = library.targets(ipxact.Design)
+linked = link(design, library)
+DesignExporter().export(library, Path("out"))
 ```
 
 The script runs like `python soc.py` would: a helper module next to it can be imported, and a

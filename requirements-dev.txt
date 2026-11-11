@@ -7,4 +7,4 @@
 -e ../XactFlow-design
 pytest
 mypy
-xactflow-design>=0.2.0
+xactflow-design>=0.2.1

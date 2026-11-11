@@ -221,14 +221,18 @@ below.
 
 ```python
 class ArchiDescImporter(xactflow.Importer):
-    def import_(self, source: Path, **options) -> ipxact.Design: ...
+    def import_(self, source: Path, library: xactflow.Library, **options) -> None: ...
 ```
 
 It executes `source` as a plain Python file (`runpy.run_path`), then looks for a
 module-level variable named `design`, of type `Design`. Missing or wrong-typed `design`
-raises `ValueError` naming what was expected. It then calls `.build()` on it and returns
-the result. Nothing about `Library` setup is the importer's business, that already
-happened inside the script when it constructed its own `Design`.
+raises `ValueError` naming what was expected. It then calls `.build()` on it and adds the
+result to `library` as a target (`library.add(design, source, replace=True, target=True)`),
+which is what an exporter writes. The design is regenerated from the script on every run,
+so it replaces a design with the same VLNV already in `library`, e.g. its previous output
+scanned from a `--lib` folder. The script still builds its own `Design` on its own
+`Library`: `library` is where the result goes, and where an exporter run after the importer
+looks up the components it instantiates.
 
 ## Worked example
 
@@ -264,8 +268,9 @@ names the one to use with `.bus(name)`.
 the same `library` resolves and checks it exactly as it would a hand-written or
 hand-exported design, all in this one script, with no separate importer step needed.
 Running the same script through `ArchiDescImporter` instead (letting the CLI or another
-tool drive it) does that same `build()` call automatically; linking is then up to
-whatever calls the importer, not shown here.
+tool drive it) does that same `build()` call automatically and adds the result to the
+library it is given; linking is then up to whatever exporter reads that library, not shown
+here.
 
 ## Requirement on imported components
 
@@ -285,7 +290,7 @@ Things this first version leaves open, on purpose:
 - **Hierarchical design description.** A sub-design instantiated as a component inside a
   bigger one is not addressed here; this format currently describes exactly one flat
   design. `XactFlow`'s own linker doesn't recurse into nested designs yet either
-  (see its README's "No multi-level design hierarchy" limitation), so there is nothing
+  (see its README's "One level of hierarchy" limitation), so there is nothing
   downstream to hand a hierarchical result to yet regardless.
 - **Address mapping**, as above: a real system, not a vendor-extension placeholder, once
   `XactFlow` applies `DesignConfiguration`/`addressSpace`.

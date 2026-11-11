@@ -319,15 +319,19 @@ script, see below.
 
 \begin{lstlisting}[style=pyblock, caption={The \texttt{Importer} entry point.}]
 class ArchiDescImporter(xactflow.Importer):
-    def import_(self, source: Path, **options) -> ipxact.Design: ...
+    def import_(self, source: Path, library: xactflow.Library, **options) -> None: ...
 \end{lstlisting}
 
 It executes \code{source} as a plain Python file (\code{runpy.run\_path}), then looks for
 a module-level variable named \code{design}, of type \code{Design}. Missing or
 wrong-typed \code{design} raises \code{ValueError} naming what was expected. It then
-calls \code{.build()} on it and returns the result. Nothing about \code{Library} setup is
-the importer's business, that already happened inside the script when it constructed its
-own \code{Design}.
+calls \code{.build()} on it and adds the result to \code{library} as a target
+(\code{library.add(design, source, replace=True, target=True)}), which is what an
+exporter writes. The design is regenerated from the script on every run, so it replaces
+a design with the same VLNV already in \code{library}, e.g.\ its previous output scanned
+from a \code{-{}-lib} folder. The script still builds its own \code{Design} on its own
+\code{Library}: \code{library} is where the result goes, and where an exporter run after
+the importer looks up the components it instantiates.
 
 \section{Worked example}
 
@@ -364,8 +368,9 @@ The interconnect has several identical ports on each side, so each
 \code{library} resolves and checks it exactly as it would a hand-written or
 hand-exported design, all in this one script, with no separate importer step needed.
 Running the same script through \code{ArchiDescImporter} instead (letting the CLI or
-another tool drive it) does that same \code{build()} call automatically; linking is
-then up to whatever calls the importer, not shown here.
+another tool drive it) does that same \code{build()} call automatically and adds the
+result to the library it is given; linking is then up to whatever exporter reads that
+library, not shown here.
 
 \section{Requirement on imported components}
 \label{sec:relationship-sv}
@@ -387,7 +392,7 @@ Things this first version leaves open, on purpose:
     \item \textbf{Hierarchical design description.} A sub-design instantiated as a
     component inside a bigger one is not addressed here; this format currently describes
     exactly one flat design. \code{XactFlow}'s own linker doesn't recurse into nested
-    designs yet either (see its README's ``No multi-level design hierarchy''
+    designs yet either (see its README's ``One level of hierarchy''
     limitation), so there is nothing downstream to hand a hierarchical result to yet
     regardless.
     \item \textbf{Address mapping}, as above: a real system, not a vendor-extension

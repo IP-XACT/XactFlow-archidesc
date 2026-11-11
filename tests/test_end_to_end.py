@@ -1,12 +1,12 @@
-"""The full flow on the worked example: run the script through the importer, link the
-result, export it to an IP-XACT design file, and read that file back."""
+"""The full flow on the worked example: run the script through the importer into a library,
+link the result against it, export it to an IP-XACT design file, and read that file back."""
 
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from xml.etree.ElementTree import canonicalize
 
 import ipxact
-from xactflow import link
+from xactflow import Library, link
 from xactflow_design import DesignExporter
 
 from xactflow_archidesc import ArchiDescImporter
@@ -34,8 +34,10 @@ def _canonical(value):
     return value
 
 
-def test_worked_example_imports_links_exports_and_reads_back(library, tmp_path):
-    design = ArchiDescImporter().import_(SCRIPT)
+def test_worked_example_imports_links_exports_and_reads_back(tmp_path):
+    library = Library.scan(SCRIPT.parent / "library")
+    ArchiDescImporter().import_(SCRIPT, library)
+    [design] = library.targets(ipxact.Design)
 
     assert [i.instance_name for i in design.component_instances] == ["cpu", "uart", "timer", "debug", "bus"]
     assert [i.name for i in design.interconnections] == ["cpu_to_bus", "bus_to_uart", "bus_to_timer"]
@@ -49,5 +51,5 @@ def test_worked_example_imports_links_exports_and_reads_back(library, tmp_path):
     assert len(linked.instances) == 5
     assert len(linked.interconnections) == 3
 
-    DesignExporter().export(design, tmp_path)
+    DesignExporter().export(library, tmp_path)
     assert _canonical(ipxact.parse_file(tmp_path / "example.org_soc_example_0.1.xml")) == _canonical(design)

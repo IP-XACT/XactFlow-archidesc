@@ -14,7 +14,7 @@ authors = [
 ]
 requires-python = ">=3.9"
 dependencies = [
-    "xactflow>=0.3.0",
+    "xactflow>=0.4.0",
     "ipxact-compiler>=0.2.0",
 ]
 keywords = [
@@ -42,7 +42,7 @@ Issues = "https://github.com/IP-XACT/XactFlow-archidesc/issues"
 dev = [
     "pytest",
     "mypy",
-    "xactflow-design>=0.2.0",
+    "xactflow-design>=0.3.0",
 ]
 
 [project.entry-points."xactflow.importers"]

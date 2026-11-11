@@ -1,9 +1,10 @@
 import sys
 from pathlib import Path
+from typing import Optional
 
 import ipxact
 import pytest
-from xactflow import discover_importers
+from xactflow import Library, discover_importers
 
 from xactflow_archidesc import ArchiDescImporter
 
@@ -23,21 +24,64 @@ design.connect(debug.debug_req_o, cpu.debug_req_i)
 """
 
 
+def _import(script: Path, library: Optional[Library] = None) -> ipxact.Design:
+    """Run the importer on the script and return the one design it added to the library."""
+    library = Library() if library is None else library
+    ArchiDescImporter().import_(script, library)
+    [design] = library.targets(ipxact.Design)
+    return design
+
+
 def test_importer_is_registered():
     assert discover_importers()["archidesc"] is ArchiDescImporter
 
 
-def test_import_runs_the_script_and_returns_the_built_design(tmp_path):
+def test_import_runs_the_script_and_adds_the_built_design_as_a_target(tmp_path):
     script = tmp_path / "top.py"
     script.write_text(SCRIPT)
 
-    design = ArchiDescImporter().import_(script)
+    design = _import(script)
 
     assert isinstance(design, ipxact.Design)
     assert design.vlnv == ipxact.VLNV("example.org", "soc", "top", "1.0")
     assert [i.instance_name for i in design.component_instances] == ["cpu", "ic", "debug"]
     assert [i.name for i in design.interconnections] == ["cpu_to_ic"]
     assert [c.name for c in design.ad_hoc_connections] == ["debug_debug_req_o_to_cpu_debug_req_i"]
+
+
+def test_import_records_the_script_as_the_design_source(tmp_path):
+    script = tmp_path / "top.py"
+    script.write_text(SCRIPT)
+    library = Library()
+
+    design = _import(script, library)
+
+    assert library.entries[design.vlnv].path == script
+
+
+def test_import_leaves_the_documents_already_in_the_library_as_they_are(tmp_path):
+    script = tmp_path / "top.py"
+    script.write_text(SCRIPT)
+    library = Library.scan(LIBRARY)
+    looked_up = list(library.documents())
+
+    design = _import(script, library)
+
+    assert list(library.documents()) == looked_up + [design]
+    assert library.diagnostics == []
+
+
+def test_import_replaces_the_previous_output_of_the_script(tmp_path):
+    script = tmp_path / "top.py"
+    script.write_text(SCRIPT)
+    library = Library()
+    library.add(ipxact.Design(vlnv=ipxact.VLNV("example.org", "soc", "top", "1.0")), tmp_path / "top.xml")
+
+    design = _import(script, library)
+
+    assert design.component_instances
+    assert list(library.documents(ipxact.Design)) == [design]
+    assert library.diagnostics == []
 
 
 @pytest.mark.parametrize(
@@ -52,7 +96,7 @@ def test_import_rejects_a_script_without_a_design(tmp_path, ending, message):
     script.write_text(SCRIPT + ending + "\n")
 
     with pytest.raises(ValueError, match=message):
-        ArchiDescImporter().import_(script)
+        _import(script)
 
 
 def test_script_can_import_a_module_next_to_it(tmp_path):
@@ -60,7 +104,7 @@ def test_script_can_import_a_module_next_to_it(tmp_path):
     script = tmp_path / "top.py"
     script.write_text("from helpers import TOP\n" + SCRIPT.replace('"example.org:soc:top:1.0"', "TOP"))
 
-    assert ArchiDescImporter().import_(script).vlnv.name == "top"
+    assert _import(script).vlnv.name == "top"
 
 
 def test_scripts_in_two_folders_each_get_their_own_helper_module(tmp_path):
@@ -72,7 +116,7 @@ def test_scripts_in_two_folders_each_get_their_own_helper_module(tmp_path):
         scripts.append(folder / "top.py")
         scripts[-1].write_text("from helpers import TOP\n" + SCRIPT.replace('"example.org:soc:top:1.0"', "TOP"))
 
-    assert [ArchiDescImporter().import_(script).vlnv.name for script in scripts] == ["soc_a", "soc_b"]
+    assert [_import(script).vlnv.name for script in scripts] == ["soc_a", "soc_b"]
 
 
 def test_a_package_installed_below_the_script_folder_stays_imported(tmp_path, monkeypatch):
@@ -87,7 +131,7 @@ def test_a_package_installed_below_the_script_folder_stays_imported(tmp_path, mo
     script = tmp_path / "top.py"
     script.write_text("import archidesc_test_pkg.sub\n" + SCRIPT)
 
-    ArchiDescImporter().import_(script)
+    _import(script)
 
     assert "archidesc_test_pkg.sub" in sys.modules
 
@@ -97,12 +141,12 @@ def test_the_script_error_is_raised_even_if_the_script_left_sys_path(tmp_path):
     script.write_text("import os, sys\nsys.path.remove(os.path.dirname(__file__))\nraise RuntimeError('boom')\n")
 
     with pytest.raises(RuntimeError, match="boom"):
-        ArchiDescImporter().import_(script)
+        ArchiDescImporter().import_(script, Library())
 
 
 def test_import_rejects_a_path_that_is_not_a_file(tmp_path):
     with pytest.raises(ValueError, match="is not a file"):
-        ArchiDescImporter().import_(tmp_path)
+        ArchiDescImporter().import_(tmp_path, Library())
 
 
 def test_import_rejects_options(tmp_path):
@@ -110,4 +154,4 @@ def test_import_rejects_options(tmp_path):
     script.write_text(SCRIPT)
 
     with pytest.raises(ValueError, match="takes no options, got: verbose"):
-        ArchiDescImporter().import_(script, verbose="1")
+        ArchiDescImporter().import_(script, Library(), verbose="1")

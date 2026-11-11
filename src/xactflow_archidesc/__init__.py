@@ -1,26 +1,29 @@
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 import runpy
 import sys
 from pathlib import Path
 from typing import Set
 
-import ipxact
-from xactflow import Importer
+from xactflow import Importer, Library
 
 from .design import BusInterfaceRef, Design, IPInstance, PortRef
 
 
 class ArchiDescImporter(Importer):
-    """Runs a Python design description script and returns the ipxact.Design it describes.
+    """Runs a Python design description script and adds the ipxact.Design it describes to a
+    Library, as a target.
 
     The script must define a module-level variable named `design`, holding a Design. It runs
     like `python script.py` would: its own folder is importable while it runs.
+
+    The design is regenerated from the script on every run, so it replaces a design with the same
+    VLNV already in the library, e.g. the previous output scanned from a --lib folder.
     """
 
     name = "archidesc"
 
-    def import_(self, source_path: Path, **options: object) -> ipxact.Design:
+    def import_(self, source_path: Path, library: Library, **options: object) -> None:
         if options:
             raise ValueError(f"the archidesc importer takes no options, got: {', '.join(options)}")
         source_path = Path(source_path)
@@ -43,7 +46,7 @@ class ArchiDescImporter(Importer):
             raise ValueError(
                 f"{source_path}: 'design' must be a xactflow_archidesc.Design, got {kind.__module__}.{kind.__qualname__}"
             )
-        return design.build()
+        library.add(design.build(), source_path, replace=True, target=True)
 
 
 def _forget_modules_from(folder: Path, modules_before: Set[str]) -> None:
