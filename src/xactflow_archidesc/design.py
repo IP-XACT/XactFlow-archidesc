@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import math
 import re
 import sys
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from enum import Enum
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Set, Tuple, Type, TypeVar, Union
 from xml.sax.saxutils import quoteattr
 
@@ -15,9 +17,13 @@ from xactflow import Library
 # Namespace of the vendor extensions this importer writes.
 XACTFLOW_NAMESPACE = "https://github.com/IP-XACT/XactFlow"
 
-# IP-XACT's naming rule for an instance name (an XML Name in the schema). ":" is also allowed
-# there but left out.
-_INSTANCE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+# IP-XACT's naming rule for an instance, port or bus interface name (an XML Name in the schema).
+# ":" is also allowed there but left out.
+_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
+
+# The view of the component containing the design, and its designInstantiation.
+_VIEW = "hierarchical"
+_DESIGN_INSTANTIATION = "hierarchical_design"
 
 _Direction = ipxact.Direction
 _Mode = ipxact.InterfaceMode
@@ -28,6 +34,18 @@ _CONNECTABLE = {
     _Direction.OUT: {_Direction.IN, _Direction.INOUT},
     _Direction.INOUT: {_Direction.IN, _Direction.OUT, _Direction.INOUT},
 }
+
+# Seen from inside the design, a top-level "in" port drives the instance ports it connects to, and
+# a top-level "out" port is driven by them.
+_INSIDE_DIRECTION = {
+    _Direction.IN: _Direction.OUT,
+    _Direction.OUT: _Direction.IN,
+    _Direction.INOUT: _Direction.INOUT,
+    _Direction.PHANTOM: _Direction.PHANTOM,
+}
+
+# The directions add_port() accepts.
+_TOP_DIRECTIONS = (_Direction.IN, _Direction.OUT, _Direction.INOUT)
 
 # The bus interface modes that can be connected together (IEEE 1685-2022 SCR 2.4, 2.5, 2.8, 2.9).
 _MODE_PAIRS = {
@@ -45,6 +63,17 @@ _TARGET_SIDE_MODES = {_Mode.TARGET, _Mode.MIRRORED_INITIATOR}
 
 # The modes that belong to a system group.
 _SYSTEM_MODES = {_Mode.SYSTEM, _Mode.MIRRORED_SYSTEM}
+
+# The modes add_bus() accepts, with the BusInterface field and element each one sets. A top-level
+# interface only stands for the internal one it connects to, so a monitor has nothing to watch.
+_TOP_MODE_ELEMENTS = {
+    _Mode.INITIATOR: ("initiator", ipxact.InitiatorInterface),
+    _Mode.TARGET: ("target", ipxact.TargetInterface),
+    _Mode.MIRRORED_INITIATOR: ("mirrored_initiator", ipxact.MirroredInitiatorInterface),
+    _Mode.MIRRORED_TARGET: ("mirrored_target", ipxact.MirroredTargetInterface),
+    _Mode.SYSTEM: ("system", ipxact.SystemInterface),
+    _Mode.MIRRORED_SYSTEM: ("mirrored_system", ipxact.SystemInterface),
+}
 
 
 def _find(items: Sequence[Any], name: str, owner: str, kind: str) -> Any:
@@ -84,25 +113,38 @@ class IPInstance:
 
 
 # Two refs are equal when they point at the same instance and name. The ipxact object they
-# carry is left out of comparing, hashing and printing, it is only there to be read.
+# carry is left out of comparing, hashing and printing, it is only there to be read. A ref with
+# no instance is a top-level port or bus interface, of the component containing the design.
 
 
 @dataclass(frozen=True)
 class PortRef:
-    """One port of one component instance, used by Design.connect()."""
+    """One port of one component instance, or a top-level port, used by Design.connect()."""
 
-    instance: IPInstance
+    instance: Optional[IPInstance]
     name: str
     port: ipxact.Port = field(compare=False, repr=False)
 
 
 @dataclass(frozen=True)
 class BusInterfaceRef:
-    """One bus interface of one component instance, used by Design.connect_bus()."""
+    """One bus interface of one component instance, or a top-level one, used by Design.connect_bus()."""
 
-    instance: IPInstance
+    instance: Optional[IPInstance]
     name: str
     bus_interface: ipxact.BusInterface = field(compare=False, repr=False)
+
+
+def _path(ref: Union[PortRef, BusInterfaceRef], separator: str = ".") -> str:
+    """"cpu.clk_i" for a port or bus interface of an instance, "clk_i" for a top-level one."""
+    return ref.name if ref.instance is None else f"{ref.instance.name}{separator}{ref.name}"
+
+
+def _instance(ref: Union[PortRef, BusInterfaceRef]) -> IPInstance:
+    """The instance of a ref the caller knows is not top-level."""
+    if ref.instance is None:
+        raise TypeError(f"{ref!r} is top-level, an instance one was expected")
+    return ref.instance
 
 
 def _port_kind(ref: PortRef) -> str:
@@ -111,42 +153,66 @@ def _port_kind(ref: PortRef) -> str:
     return "transactional" if ref.port.transactional is not None else "structured"
 
 
+def _top_level(ref: Union[PortRef, BusInterfaceRef]) -> str:
+    return "top-level " if ref.instance is None else ""
+
+
 def _describe(ref: PortRef) -> str:
     detail = ref.port.wire.direction.value if ref.port.wire is not None else _port_kind(ref)
-    return f"{ref.instance.name}.{ref.name} ({detail})"
+    return f"{_path(ref)} ({_top_level(ref)}{detail})"
+
+
+def _inside_direction(ref: PortRef) -> Optional[ipxact.Direction]:
+    """The direction of a wire port as seen from inside the design, None for another kind of port."""
+    if ref.port.wire is None:
+        return None
+    direction = ref.port.wire.direction
+    return direction if ref.instance is not None else _INSIDE_DIRECTION[direction]
 
 
 def _port_problem(source: PortRef, target: PortRef) -> Optional[str]:
     """Return why the two ports cannot be connected, or None if they can.
 
     Only wire ports have their direction checked. Two transactional or two structured ports are
-    connected as they are.
+    connected as they are. A top-level port is checked by its direction seen from inside, so it
+    connects to an instance port of the same direction.
     """
     if source == target:
         return "cannot connect a port to itself"
+    if source.instance is None and target.instance is None:
+        return "cannot connect two top-level ports"
     kinds = (_port_kind(source), _port_kind(target))
     if kinds[0] != kinds[1]:
         return f"cannot connect a {kinds[0]} port to a {kinds[1]} port"
-    if source.port.wire is None or target.port.wire is None:
+    source_direction, target_direction = _inside_direction(source), _inside_direction(target)
+    if source_direction is None or target_direction is None:
         return None
-    directions = (source.port.wire.direction, target.port.wire.direction)
-    if _Direction.PHANTOM in directions:
+    if _Direction.PHANTOM in (source_direction, target_direction):
         return "a phantom port cannot be connected"
-    if directions[1] not in _CONNECTABLE[directions[0]]:
+    if target_direction not in _CONNECTABLE[source_direction]:
+        if source.instance is None or target.instance is None:
+            return "a top-level port needs an instance port of the same direction, or an 'inout' one"
         return "needs one 'in' and one 'out' port, or an 'inout' one"
     return None
 
 
 def _describe_bus(ref: BusInterfaceRef) -> str:
     bus = ref.bus_interface
-    return f"{ref.instance.name}.{ref.name} ({bus.bus_type.vlnv}, {bus.mode.value})"
+    return f"{_path(ref)} ({_top_level(ref)}{bus.bus_type.vlnv}, {bus.mode.value})"
 
 
 def _label(side: object) -> str:
     """How a connect_bus() side is shown in messages: "cpu", or "cpu.bus_if" when named."""
     if isinstance(side, BusInterfaceRef):
-        return f"{side.instance.name}.{side.name}"
+        return _path(side)
     return side.name if isinstance(side, IPInstance) else repr(side)
+
+
+def _end_name(side: Union[IPInstance, BusInterfaceRef]) -> str:
+    """One side of a connect_bus() connection name: the instance, or the top-level interface."""
+    if isinstance(side, BusInterfaceRef):
+        return side.name if side.instance is None else side.instance.name
+    return side.name
 
 
 def _watches(monitor: ipxact.BusInterface, other: ipxact.BusInterface) -> bool:
@@ -194,17 +260,17 @@ _PROBLEMS = (_NO_BUS_TYPE, _NO_MODES, _NO_GROUP)
 
 
 def _active_interface(ref: BusInterfaceRef, address_mapping: List[str]) -> ipxact.ActiveInterface:
-    """One side of an interconnection. The address mapping only goes on the target side."""
+    """One instance side of an interconnection. The address mapping only goes on the target side."""
     on_target_side = ref.bus_interface.mode in _TARGET_SIDE_MODES
     return ipxact.ActiveInterface(
-        component_instance_ref=ref.instance.name,
+        component_instance_ref=_instance(ref).name,
         bus_ref=ref.name,
         vendor_extensions=list(address_mapping) if on_target_side else [],
     )
 
 
 def _monitor_interface(ref: BusInterfaceRef) -> ipxact.MonitorInterfaceRef:
-    return ipxact.MonitorInterfaceRef(component_instance_ref=ref.instance.name, bus_ref=ref.name)
+    return ipxact.MonitorInterfaceRef(component_instance_ref=_instance(ref).name, bus_ref=ref.name)
 
 
 @dataclass
@@ -237,6 +303,7 @@ def _address_mapping_extensions(where: str, base_addr: Optional[int], size: Opti
 
 
 _T = TypeVar("_T")
+_E = TypeVar("_E", bound=Enum)
 
 
 def _check_type(value: object, expected: Type[_T], what: str) -> _T:
@@ -244,6 +311,80 @@ def _check_type(value: object, expected: Type[_T], what: str) -> _T:
     if not isinstance(value, expected):
         raise TypeError(f"{what} must be a {expected.__name__}, got {type(value).__name__}: {value!r}")
     return value
+
+
+def _check_name(value: object, what: str) -> str:
+    name = _check_type(value, str, what)
+    if not _NAME.fullmatch(name):
+        raise ValueError(
+            f"{what} must start with a letter or '_', not a digit, followed by letters, digits, '_', '.' "
+            f"or '-' (IP-XACT naming rule), got: {name!r}"
+        )
+    return name
+
+
+def _choice(value: object, choices: Sequence[_E], what: str) -> _E:
+    """Return the choice whose IP-XACT value is value, e.g. "in" for Direction.IN."""
+    for choice in choices:
+        if value == choice.value:
+            return choice
+    raise ValueError(f"{what} must be one of {', '.join(repr(c.value) for c in choices)}, got: {value!r}")
+
+
+def _vectors(width: object, what: str) -> List[ipxact.Vector]:
+    """A [width-1:0] vector, or none for a single bit when width is None."""
+    if width is None:
+        return []
+    if isinstance(width, bool) or not isinstance(width, int):
+        raise TypeError(f"{what} must be an int, got {type(width).__name__}: {width!r}")
+    if width < 1:
+        raise ValueError(f"{what} must be at least 1, got: {width}")
+    return [ipxact.Vector(left=ipxact.Expression(str(width - 1)), right=ipxact.Expression("0"))]
+
+
+def _mode_element(mode: ipxact.InterfaceMode, group: object, where: str) -> Tuple[str, object]:
+    """The BusInterface field add_bus() sets for mode, and its value. A system mode needs its
+    group, no other one."""
+    if (mode in _SYSTEM_MODES) != (group is not None):
+        raise ValueError(f"{where}: group is needed for a system or mirroredSystem mode, and only for them")
+    attribute, element = _TOP_MODE_ELEMENTS[mode]
+    if group is None:
+        return attribute, element()
+    return attribute, element(group=_check_type(group, str, f"{where}: group"))
+
+
+def _exposed(top: BusInterfaceRef, internal: BusInterfaceRef, where: str) -> Tuple[List[ipxact.AbstractionType], List[ipxact.Port]]:
+    """What a top-level bus interface takes from the internal one it connects to: its abstraction
+    types, and a top-level port for each port they map, named <bus>_<logical port> and copied from
+    the internal port.
+    """
+    component = _instance(internal).component
+    internal_ports = component.model.ports if component.model is not None else []
+    abstraction_types = copy.deepcopy(internal.bus_interface.abstraction_types)
+    sources: Dict[str, str] = {}  # top-level port name -> internal port it copies
+    for abstraction_type in abstraction_types:
+        abstraction_type.view_refs = []  # they name views of the internal component
+        for port_map in abstraction_type.port_maps:
+            if port_map.physical_port is None:
+                continue  # a tie-off, no port to copy
+            if port_map.part_select is not None or port_map.sub_port_refs:
+                raise ValueError(
+                    f"{where}: {_path(internal)} maps logical port {port_map.logical_port!r} to part of "
+                    f"port {port_map.physical_port!r}, which cannot be copied to a top-level port"
+                )
+            name = f"{top.name}_{port_map.logical_port}"
+            source = sources.setdefault(name, port_map.physical_port)
+            if source != port_map.physical_port:
+                raise ValueError(
+                    f"{where}: {_path(internal)} maps logical port {port_map.logical_port!r} to both "
+                    f"{source!r} and {port_map.physical_port!r}"
+                )
+            port_map.physical_port = name
+    ports = [
+        replace(copy.deepcopy(_find(internal_ports, source, repr(_instance(internal)), "port")), name=name)
+        for name, source in sources.items()
+    ]
+    return abstraction_types, ports
 
 
 def _parse_vlnv(value: object, what: str) -> ipxact.VLNV:
@@ -305,15 +446,22 @@ def _transforms_extensions(where: str, transforms: Optional[List[str]]) -> List[
 
 
 class Design:
-    """Describes one flat design: its component instances and how they are connected.
+    """Describes one design: its component instances, how they are connected, and the top-level
+    ports and bus interfaces of the component containing it.
 
-    build() turns it into an ipxact.Design.
+    vlnv names the whole: the component gets <name>.component and the design <name>.design.
+    build() turns it into an ipxact.Design, build_component() into the ipxact.Component.
     """
 
     def __init__(self, vlnv: str, library: Library) -> None:
-        self.vlnv = _parse_vlnv(vlnv, "Design(): vlnv")
+        base = _parse_vlnv(vlnv, "Design(): vlnv")
+        self.vlnv = replace(base, name=f"{base.name}.design")
+        self.component_vlnv = replace(base, name=f"{base.name}.component")
         self.library = library
         self._instances: Dict[str, _InstanceRecord] = {}
+        # The top-level ports, each with the call that added it, and the top-level bus interfaces.
+        self._ports: Dict[str, Tuple[ipxact.Port, str]] = {}
+        self._buses: Dict[str, ipxact.BusInterface] = {}
         self._ad_hoc_connections: Dict[FrozenSet[PortRef], ipxact.AdHocConnection] = {}
         self._interconnections: List[ipxact.Interconnection] = []
         self._monitor_interconnections: List[ipxact.MonitorInterconnection] = []
@@ -337,7 +485,7 @@ class Design:
         self._check_new_instance_name(instance_name, call_site)
         where = f"add_ip('{instance_name}')"
         component_vlnv = _parse_vlnv(vlnv, f"{where}: vlnv")
-        component = self._resolve_component(where, component_vlnv)
+        component = self._resolve(where, component_vlnv, ipxact.Component)
 
         component_instance = ipxact.ComponentInstance(
             instance_name=instance_name,
@@ -351,11 +499,56 @@ class Design:
         self._instances[instance_name] = _InstanceRecord(instance, component_instance, call_site)
         return instance
 
+    def add_port(
+        self, direction: str, name: str, width: Optional[int] = None, *, connect: Optional[PortRef] = None
+    ) -> PortRef:
+        """Add one top-level wire port, and connect it to connect if given."""
+        where = f"add_port({name!r})"
+        self._check_new_port_name(_check_name(name, "add_port(): name"), where)
+        port = ipxact.Port(
+            name=name,
+            wire=ipxact.WirePort(
+                direction=_choice(direction, _TOP_DIRECTIONS, f"{where}: direction"),
+                vectors=_vectors(width, f"{where}: width"),
+            ),
+        )
+        self._ports[name] = (port, "add_port()")
+        ref = PortRef(None, name, port)
+        if connect is not None:
+            self.connect(ref, connect)
+        return ref
+
+    def add_bus(
+        self,
+        name: str,
+        bus_type: str,
+        mode: str,
+        *,
+        group: Optional[str] = None,
+        connect: Union[IPInstance, BusInterfaceRef, None] = None,
+    ) -> BusInterfaceRef:
+        """Add one top-level bus interface, and connect it to connect if given.
+
+        Its ports are added when it is connected, copied from the internal interface.
+        """
+        where = f"add_bus({name!r})"
+        if _check_name(name, "add_bus(): name") in self._buses:
+            raise ValueError(f"{where}: top-level bus interface {name!r} already exists")
+        bus_type_vlnv = _parse_vlnv(bus_type, f"{where}: bus_type")
+        self._resolve(where, bus_type_vlnv, ipxact.BusDefinition)
+        mode = _choice(mode, list(_TOP_MODE_ELEMENTS), f"{where}: mode")
+        bus_interface = ipxact.BusInterface(name=name, bus_type=ipxact.VLNVRef(**asdict(bus_type_vlnv)), mode=mode)
+        setattr(bus_interface, *_mode_element(mode, group, where))
+        self._buses[name] = bus_interface
+        ref = BusInterfaceRef(None, name, bus_interface)
+        if connect is not None:
+            self.connect_bus(ref, connect)
+        return ref
+
     def connect(self, source: PortRef, target: PortRef) -> None:
         """Add one ad hoc connection between two whole ports."""
         for what, ref in (("connect(): source", source), ("connect(): target", target)):
-            _check_type(ref, PortRef, what)
-            self._check_instance(ref.instance, what)
+            self._check_ref(_check_type(ref, PortRef, what), what)
         where = f"connect({_describe(source)}, {_describe(target)})"
         problem = _port_problem(source, target)
         if problem is not None:
@@ -363,17 +556,21 @@ class Design:
         ports = frozenset((source, target))
         if ports in self._ad_hoc_connections:
             raise ValueError(f"{where}: these two ports are already connected")
-        driven = [ref for ref in (source, target) if ref.port.wire is not None and ref.port.wire.direction == _Direction.IN]
+        driven = [ref for ref in (source, target) if _inside_direction(ref) == _Direction.IN]
         for ref in driven:
             if ref in self._driven_ports:
                 raise ValueError(f"{where}: {_describe(ref)} is already driven by {self._driven_ports[ref]}")
 
-        name = self._new_connection_name(f"{source.instance.name}_{source.name}_to_{target.instance.name}_{target.name}")
+        name = self._new_connection_name(f"{_path(source, '_')}_to_{_path(target, '_')}")
         self._ad_hoc_connections[ports] = ipxact.AdHocConnection(
             name=name,
             internal_port_references=[
                 ipxact.InternalPortReference(component_instance_ref=ref.instance.name, port_ref=ref.name)
                 for ref in (source, target)
+                if ref.instance is not None
+            ],
+            external_port_references=[
+                ipxact.ExternalPortReference(port_ref=ref.name) for ref in (source, target) if ref.instance is None
             ],
         )
         self._driven_ports.update((ref, name) for ref in driven)
@@ -390,16 +587,19 @@ class Design:
 
         A side given as an IPInstance uses whichever of its free initiator or target interfaces
         matches. A side given as a BusInterfaceRef uses exactly that one, whatever its mode. A
-        monitor interface becomes a monitor interconnection, watching the other side.
+        monitor interface becomes a monitor interconnection, watching the other side. A top-level
+        interface becomes a hierInterface, and gets the ports of the internal one.
         """
         where = f"connect_bus({_label(a)}, {_label(b)})"
         address_mapping = _address_mapping_extensions(where, base_addr, size)
         instance_a, candidates_a = self._bus_side(a, f"{where}: a")
         instance_b, candidates_b = self._bus_side(b, f"{where}: b")
         if instance_a is instance_b:
-            raise ValueError(f"{where}: cannot connect an instance to itself")
+            what = "two top-level bus interfaces" if instance_a is None else "an instance to itself"
+            raise ValueError(f"{where}: cannot connect {what}")
+        hierarchical = instance_a is None or instance_b is None
 
-        problems = {(x, y): self._connect_problem(x, y) for x in candidates_a for y in candidates_b}
+        problems = {(x, y): self._connect_problem(x, y, hierarchical) for x in candidates_a for y in candidates_b}
         pairs = [pair for pair, problem in problems.items() if problem is None]
         if not pairs:
             tried = ", ".join(map(_describe_bus, candidates_a + candidates_b)) or "nothing"
@@ -417,10 +617,16 @@ class Design:
             if ref in self._used_bus_interfaces:
                 raise ValueError(f"{where}: {_label(ref)} is already used by {self._used_bus_interfaces[ref]}")
         has_target_side = any(ref.bus_interface.mode in _TARGET_SIDE_MODES for ref in (ref_a, ref_b))
-        if address_mapping and (monitor is not None or not has_target_side):
-            raise ValueError(f"{where}: base_addr and size need a connection with a target side")
+        if address_mapping and (monitor is not None or hierarchical or not has_target_side):
+            raise ValueError(f"{where}: base_addr and size need a connection between two instances, with a target side")
+        top = next((ref for ref in (ref_a, ref_b) if ref.instance is None), None)
+        if top is not None:
+            internal = ref_b if top is ref_a else ref_a
+            abstraction_types, ports = _exposed(top, internal, where)
+            for port in ports:
+                self._check_new_port_name(port.name, where)
 
-        name = self._new_connection_name(f"{instance_a.name}_to_{instance_b.name}")
+        name = self._new_connection_name(f"{_end_name(a)}_to_{_end_name(b)}")
         if monitor is not None:
             watched = ref_b if monitor is ref_a else ref_a
             self._monitor_interconnections.append(
@@ -431,13 +637,18 @@ class Design:
                 )
             )
         else:
+            active = [_active_interface(ref, address_mapping) for ref in (ref_a, ref_b) if ref.instance is not None]
             self._interconnections.append(
                 ipxact.Interconnection(
                     name=name,
-                    active_interface=_active_interface(ref_a, address_mapping),
-                    other_active_interfaces=[_active_interface(ref_b, address_mapping)],
+                    active_interface=active[0],
+                    other_active_interfaces=active[1:],
+                    hier_interfaces=[ipxact.HierInterface(bus_ref=top.name)] if top is not None else [],
                 )
             )
+        if top is not None:
+            top.bus_interface.abstraction_types = abstraction_types
+            self._ports.update((port.name, (port, where)) for port in ports)
         self._used_bus_interfaces.update((ref, name) for ref in connected)
 
     def build(self) -> ipxact.Design:
@@ -450,19 +661,36 @@ class Design:
             ad_hoc_connections=list(self._ad_hoc_connections.values()),
         )
 
-    def _connect_problem(self, a: BusInterfaceRef, b: BusInterfaceRef) -> Optional[str]:
+    def build_component(self) -> ipxact.Component:
+        """Return the ipxact.Component containing the design: the top-level ports and bus
+        interfaces, and a view instantiating the design."""
+        return ipxact.Component(
+            vlnv=self.component_vlnv,
+            bus_interfaces=list(self._buses.values()),
+            model=ipxact.Model(
+                views=[ipxact.View(name=_VIEW, design_instantiation_ref=_DESIGN_INSTANTIATION)],
+                design_instantiations=[
+                    ipxact.DesignInstantiation(name=_DESIGN_INSTANTIATION, design_ref=ipxact.VLNVRef(**asdict(self.vlnv)))
+                ],
+                ports=[port for port, _ in self._ports.values()],
+            ),
+        )
+
+    def _connect_problem(self, a: BusInterfaceRef, b: BusInterfaceRef, hierarchical: bool) -> Optional[str]:
         """Return why the two bus interfaces cannot be connected, or None if they can.
 
         They need the same bus definition, or one that extends the other (SCR 2.2), and modes
-        that can be connected. A system interface, a mirrored-system interface and a monitor of
-        either also need the same group (SCR 2.13, 4.4). Only the bus definitions are compared
-        for now, not the parameter values set on the bus type.
+        that can be connected: opposite ones between two instances, the same one between a
+        top-level interface and an instance (SCR 2.4 to 2.10). A system interface, a
+        mirrored-system interface and a monitor of either also need the same group (SCR 2.13,
+        4.4). Only the bus definitions are compared for now, not the parameter values set on the
+        bus type.
         """
         bus_a, bus_b = a.bus_interface, b.bus_interface
         family_a, family_b = self._bus_family(bus_a), self._bus_family(bus_b)
         if bus_a.bus_type.vlnv not in family_b and bus_b.bus_type.vlnv not in family_a:
             return _NO_BUS_TYPE
-        if not _modes_match(bus_a, bus_b):
+        if not (bus_a.mode == bus_b.mode if hierarchical else _modes_match(bus_a, bus_b)):
             return _NO_MODES
         if _system_group(bus_a) != _system_group(bus_b):
             return _NO_GROUP
@@ -484,12 +712,7 @@ class Design:
         return name
 
     def _check_new_instance_name(self, instance_name: object, call_site: str) -> None:
-        instance_name = _check_type(instance_name, str, "add_ip(): instance name")
-        if not _INSTANCE_NAME.fullmatch(instance_name):
-            raise ValueError(
-                f"add_ip(): instance name must start with a letter or '_', not a digit, followed by letters, "
-                f"digits, '_', '.' or '-' (IP-XACT naming rule), got: {instance_name!r}"
-            )
+        instance_name = _check_name(instance_name, "add_ip(): instance name")
         earlier = self._instances.get(instance_name)
         if earlier is not None:
             raise ValueError(
@@ -497,36 +720,56 @@ class Design:
                 f"by add_ip() at {earlier.call_site}"
             )
 
+    def _check_new_port_name(self, name: str, where: str) -> None:
+        if name in self._ports:
+            raise ValueError(f"{where}: top-level port {name!r} already exists, added by {self._ports[name][1]}")
+
     def _check_instance(self, instance: IPInstance, what: str) -> None:
         """Check that instance was added to this design."""
         record = self._instances.get(instance.name)
         if record is None or record.instance is not instance:
             raise ValueError(f"{what}: {instance!r} was not added to this design")
 
-    def _bus_side(self, side: object, what: str) -> Tuple[IPInstance, List[BusInterfaceRef]]:
-        """Return the instance of one connect_bus() side, and the bus interfaces to try: the one
-        given, or the instance's initiators and targets that no connect_bus() has used yet."""
+    def _check_ref(self, ref: Union[PortRef, BusInterfaceRef], what: str) -> None:
+        """Check that ref is on an instance of this design, or is one of its top-level ports or
+        bus interfaces."""
+        if ref.instance is not None:
+            self._check_instance(ref.instance, what)
+            return
+        added: object
+        top_level: object
+        if isinstance(ref, PortRef):
+            added, top_level = self._ports.get(ref.name, (None,))[0], ref.port
+        else:
+            added, top_level = self._buses.get(ref.name), ref.bus_interface
+        if top_level is not added:
+            raise ValueError(f"{what}: {ref!r} was not added to this design")
+
+    def _bus_side(self, side: object, what: str) -> Tuple[Optional[IPInstance], List[BusInterfaceRef]]:
+        """Return the instance of one connect_bus() side (None for a top-level interface), and the
+        bus interfaces to try: the one given, or the instance's initiators and targets that no
+        connect_bus() has used yet."""
         if isinstance(side, BusInterfaceRef):
-            instance, candidates = side.instance, [side]
-        elif isinstance(side, IPInstance):
-            instance = side
+            self._check_ref(side, what)
+            return side.instance, [side]
+        if isinstance(side, IPInstance):
+            self._check_instance(side, what)
             candidates = [
                 ref
                 for ref in (BusInterfaceRef(side, bus.name, bus) for bus in side.component.bus_interfaces)
                 if ref.bus_interface.mode in _AUTO_MODES and ref not in self._used_bus_interfaces
             ]
-        else:
-            raise TypeError(f"{what} must be an IPInstance or a BusInterfaceRef, got {type(side).__name__}: {side!r}")
-        self._check_instance(instance, what)
-        return instance, candidates
+            return side, candidates
+        raise TypeError(f"{what} must be an IPInstance or a BusInterfaceRef, got {type(side).__name__}: {side!r}")
 
-    def _resolve_component(self, where: str, vlnv: ipxact.VLNV) -> ipxact.Component:
+    def _resolve(self, where: str, vlnv: ipxact.VLNV, kind: Type[_T]) -> _T:
+        """Return the document of the library with that VLNV, which must be a kind."""
         document = self.library.get(vlnv)
         if document is None:
             message = f"{where}: no document with VLNV {vlnv} in the library"
             if self.library.diagnostics:
                 message += f" (library.diagnostics has {len(self.library.diagnostics)} entries, a file may have failed to load)"
             raise ValueError(message)
-        if not isinstance(document, ipxact.Component):
-            raise ValueError(f"{where}: VLNV {vlnv} is a {type(document).__name__}, not a Component")
+        if not isinstance(document, kind):
+            raise ValueError(f"{where}: VLNV {vlnv} is a {type(document).__name__}, not a {kind.__name__}")
         return document

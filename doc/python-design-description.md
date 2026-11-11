@@ -1,11 +1,13 @@
 # Python design description format
 
 This document specifies a new `XactFlow` `Importer`: a way to describe a design's
-architecture (which IPs it instantiates, how they're wired together over buses, and any
-ad hoc signal connections) as a plain Python script, instead of hand-written IP-XACT XML.
-Running the script produces an `ipxact.Design` object, which the rest of `XactFlow`
-already knows what to do with: `link()` resolves and checks it against a `Library`,
-and `XactFlow-design` can serialize it back out to a real IP-XACT `design` XML document.
+architecture (which IPs it instantiates, how they're wired together over buses, any
+ad hoc signal connections, and the ports and bus interfaces it offers to the outside) as a
+plain Python script, instead of hand-written IP-XACT XML. Running the script produces an
+`ipxact.Design` object and the `ipxact.Component` containing it, which the rest of
+`XactFlow` already knows what to do with: `link()` resolves and checks the design against a
+`Library`, and `XactFlow-design` and `XactFlow-component` can serialize them back out to
+real IP-XACT `design` and `component` XML documents.
 
 This builds on the design description concept from *IP-XACT-Based SoC Generation: Tools
 and SoCMake Integration* (M. Travaillard, B. Denkinger, August 2026), specifically its
@@ -19,13 +21,17 @@ or CMake dependency, consistent with every other `XactFlow` plugin.
 
 What this importer does:
 
-1. Execute a Python script that declares IP instances, bus connections, and ad hoc
-   connections using the API below.
+1. Execute a Python script that declares IP instances, top-level ports and bus
+   interfaces, bus connections, and ad hoc connections using the API below.
 2. Resolve each IP reference to a real `ipxact.Component` via a `Library` the script
    itself provides.
 3. Build the corresponding `ipxact.Design` object: one `ComponentInstance` per IP
    instance, one `Interconnection` per bus connection (a `MonitorInterconnection` when one
-   side is a monitor), one `AdHocConnection` per ad hoc connection.
+   side is a monitor), one `AdHocConnection` per ad hoc connection. A top-level bus
+   interface is reached with a `hierInterface`, a top-level port with an
+   `externalPortReference`.
+4. Build the `ipxact.Component` containing the design: its top-level ports and bus
+   interfaces, and a view instantiating the design through a `designInstantiation`.
 
 What it deliberately does not do, because `XactFlow` already does it elsewhere:
 
@@ -49,14 +55,20 @@ class Design:
     def add_ip(self, instance_name: str, vlnv: str, parameters: dict[str, object] | None = None, transforms: list[str] | None = None) -> IPInstance: ...
     def connect_bus(self, a: IPInstance | BusInterfaceRef, b: IPInstance | BusInterfaceRef, *, base_addr: int | None = None, size: int | None = None) -> None: ...
     def connect(self, source: PortRef, target: PortRef) -> None: ...
+    def add_port(self, direction: str, name: str, width: int | None = None, *, connect: PortRef | None = None) -> PortRef: ...
+    def add_bus(self, name: str, bus_type: str, mode: str, *, group: str | None = None, connect: IPInstance | BusInterfaceRef | None = None) -> BusInterfaceRef: ...
     def build(self) -> ipxact.Design: ...
+    def build_component(self) -> ipxact.Component: ...
 ```
 
 ### `Design(vlnv, library)`
 
-- `vlnv`: a colon-separated `"vendor:library:name:version"` string identifying the design
-  itself. Parsed eagerly; a malformed string (not exactly 4 fields) raises `ValueError` at
-  construction.
+- `vlnv`: a colon-separated `"vendor:library:name:version"` string naming what the script
+  describes. The two documents it produces need their own VLNVs: the component containing
+  the design gets `.component` appended to the name, and the design `.design`, so
+  `"example.org:soc:example:0.1"` gives `example.org:soc:example.component:0.1` and
+  `example.org:soc:example.design:0.1`. Parsed eagerly; a malformed string (not exactly 4
+  fields) raises `ValueError` at construction.
 - `library`: an already-scanned `xactflow.Library`. The script builds this itself
   (`Library.scan(...)`) and passes it in, `Design` never constructs or owns a `Library`
   implicitly. This keeps the script fully self-contained.
@@ -191,7 +203,8 @@ An ad hoc, signal-level connection between exactly two ports, each a `PortRef` (
 compatibility to `link()`, `connect` checks the ports itself, since the check is cheap
 and both ports are already in hand:
 
-- Both ports must belong to instances of this design.
+- Both ports must belong to this design: to its instances, or be its top-level ports
+  (see [`add_port`](#add_portdirection-name-widthnone--connectnone---portref)).
 - Directions must be compatible: one `out` and one `in`, or either side `inout`. Two
   `out`s or two `in`s raise `ValueError` naming both ports and their directions.
 - A port cannot be connected to itself, and the same two ports cannot be connected twice.
@@ -200,10 +213,68 @@ and both ports are already in hand:
 On success, appends one `ipxact.AdHocConnection` with a single `InternalPortReference`
 pair (`component_instance_ref`/`port_ref` for each side), named
 `f"{source.instance.name}_{source.name}_to_{target.instance.name}_{target.name}"`
-(a number is added at the end if that name is already taken).
+(a number is added at the end if that name is already taken). A top-level port is
+written as an `ExternalPortReference` instead, and named by its own name alone.
 Bit-slice or struct-sub-port ad hoc connections (`SubPortReference`/`PartSelect` in
 `ipxact-compiler`'s model) are out of scope for this first version; `connect()` only
 wires whole ports to whole ports.
+
+### `add_port(direction, name, width=None, *, connect=None) -> PortRef`
+
+Declares one top-level wire port: a port of the component containing the design, which
+the design reaches with an `externalPortReference`.
+
+- `direction` is `"in"`, `"out"` or `"inout"`, seen from outside the component. Anything
+  else, `phantom` included, raises `ValueError`.
+- `name` follows the same naming rule as an instance name. It must be unique among the
+  top-level ports, including the ones `add_bus` creates; a duplicate raises `ValueError`
+  naming the call that added the first one.
+- `width` is `None` for a single bit, or a number of bits `N` for an `[N-1:0]` vector.
+- `connect`, if given, is a `PortRef` connected to the new port right away, exactly as
+  `connect(port, connect)` would.
+
+Returns a `PortRef` with no instance, which `connect()` takes like an instance port.
+Inside the design, a top-level port works the other way round from an instance port: a
+top-level `in` port drives the instance ports it connects to, and a top-level `out` port is
+driven by them. So `connect()` pairs a top-level port with an instance port of the same
+direction, or an `inout` one, and drives a top-level `out` port only once. A top-level
+`in` port can drive several instance ports, one `connect()` call each. Two top-level ports
+cannot be connected together.
+
+### `add_bus(name, bus_type, mode, *, group=None, connect=None) -> BusInterfaceRef`
+
+Declares one top-level bus interface: a bus interface of the component containing the
+design, which the design reaches with a `hierInterface`.
+
+- `name` follows the same naming rule, and must be unique among the top-level bus
+  interfaces.
+- `bus_type` is the VLNV of a bus definition, resolved against `library` right away, like
+  `add_ip`'s `vlnv`.
+- `mode` is the interface mode, as IP-XACT writes it: `"initiator"`, `"target"`,
+  `"mirroredInitiator"`, `"mirroredTarget"`, `"system"` or `"mirroredSystem"`. A
+  `"monitor"` has nothing to watch at the top level, and raises `ValueError`.
+- `group` is the system group: needed by a `system` or `mirroredSystem` mode, refused by
+  the others.
+- `connect`, if given, is connected to the new interface right away, exactly as
+  `connect_bus(interface, connect)` would.
+
+Returns a `BusInterfaceRef` with no instance, which `connect_bus()` takes like an
+instance's `.bus(name)`. It pairs it with an instance interface of the same bus type and
+the **same** mode, as the standard requires of a hierarchical connection (SCR 2.4 to
+2.10): a top-level target is an internal target, seen from outside. The instance side can
+still be picked automatically. Two top-level interfaces cannot be connected together, and
+`base_addr`/`size` raise `ValueError`, since the address map of a top-level interface
+belongs to the connection outside the component. The `Interconnection` has the instance
+side as its `activeInterface` and the top-level interface as a `hierInterface`, and is
+named from the top-level interface name and the instance name, e.g. `ext_if_to_apb_bus`.
+A top-level interface is connected only once.
+
+A top-level interface takes its ports from the internal interface it connects to: the
+abstraction types and port maps are copied, and each mapped port becomes a top-level port
+named `<interface>_<logical port>`, a copy of the internal one (same direction, same
+width). `ext_if` connected to an interface mapping the logical ports `CLK` and `DATA`
+gives the top-level ports `ext_if_CLK` and `ext_if_DATA`. A name already taken by another
+top-level port raises `ValueError`.
 
 ### `build() -> ipxact.Design`
 
@@ -214,8 +285,17 @@ unconnected optional interface (e.g. an unused debug port) is a legitimate, comm
 design, not an error. Completeness is `SCR`'s concern, if and when a rule for it exists,
 not this importer's.
 
-Scripts don't call `build()` themselves. The importer does, after running the script, see
-below.
+### `build_component() -> ipxact.Component`
+
+Returns the `ipxact.Component` containing the design: every top-level port, those of
+`add_port` and those `add_bus` created, every `add_bus` interface, and one view,
+`hierarchical`, whose `designInstantiation` (`hierarchical_design`) refers to the design.
+`xactflow.link()` finds the component through that view, and checks the `hierInterface`
+and `externalPortReference` elements against it. A script with no top-level port or bus
+interface still gets this component, with the view only.
+
+Scripts don't call `build()` or `build_component()` themselves. The importer does, after
+running the script, see below.
 
 ## How the importer runs a script
 
@@ -226,13 +306,14 @@ class ArchiDescImporter(xactflow.Importer):
 
 It executes `source` as a plain Python file (`runpy.run_path`), then looks for a
 module-level variable named `design`, of type `Design`. Missing or wrong-typed `design`
-raises `ValueError` naming what was expected. It then calls `.build()` on it and adds the
-result to `library` as a target (`library.add(design, source, replace=True, target=True)`),
-which is what an exporter writes. The design is regenerated from the script on every run,
-so it replaces a design with the same VLNV already in `library`, e.g. its previous output
-scanned from a `--lib` folder. The script still builds its own `Design` on its own
-`Library`: `library` is where the result goes, and where an exporter run after the importer
-looks up the components it instantiates.
+raises `ValueError` naming what was expected. It then calls `.build_component()` and
+`.build()` on it and adds both results to `library` as targets
+(`library.add(document, source, replace=True, target=True)`), which is what an exporter
+writes. They are regenerated from the script on every run, so they replace the documents
+with the same VLNVs already in `library`, e.g. its previous output scanned from a `--lib`
+folder. The script still builds its own `Design` on its own `Library`: `library` is where
+the results go, and where an exporter run after the importer looks up the components the
+design instantiates.
 
 ## Worked example
 
@@ -256,19 +337,26 @@ design.connect_bus(bus.bus("m1"), timer, base_addr=0x4002_0000, size=0x1000)
 design.connect(debug.debug_req_o, cpu.debug_req_i)
 design.connect(cpu.debug_resp_o, debug.debug_resp_i)
 
+design.add_port("inout", "jtag_io", connect=debug.jtag_io)
+design.add_port("out", "irq_o", connect=uart.irq_o)
+
+library.add(design.build_component())
 linked = link(design.build(), library)
 ```
 
 The interconnect has several identical ports on each side, so each `connect_bus` call
 names the one to use with `.bus(name)`.
 
-`design.build()` produces the `ipxact.Design`: 5 `ComponentInstance`s, 3
-`Interconnection`s (`cpu_to_apb_bus`, `apb_bus_to_uart`, `apb_bus_to_timer`, one per
-`connect_bus` call), and 2 `AdHocConnection`s. Passing it straight to `link()` with
-the same `library` resolves and checks it exactly as it would a hand-written or
-hand-exported design, all in this one script, with no separate importer step needed.
-Running the same script through `ArchiDescImporter` instead (letting the CLI or another
-tool drive it) does that same `build()` call automatically and adds the result to the
+`design.build()` produces the `ipxact.Design` `cern.ch:soc:example.design:0.1`: 5
+`ComponentInstance`s, 3 `Interconnection`s (`cpu_to_apb_bus`, `apb_bus_to_uart`,
+`apb_bus_to_timer`, one per `connect_bus` call), and 4 `AdHocConnection`s, 2 of them to
+the top-level ports. `design.build_component()` produces the `ipxact.Component`
+`cern.ch:soc:example.component:0.1` containing it, with the top-level ports `jtag_io` and
+`irq_o`. With that component added to the same `library`, `link()` resolves and checks the
+design exactly as it would a hand-written or hand-exported one, top-level ports included,
+all in this one script, with no separate importer step needed. Running the same script
+through `ArchiDescImporter` instead (letting the CLI or another tool drive it) does the
+same `build_component()` and `build()` calls automatically and adds both results to the
 library it is given; linking is then up to whatever exporter reads that library, not shown
 here.
 
@@ -288,12 +376,19 @@ something specific to one importer.
 Things this first version leaves open, on purpose:
 
 - **Hierarchical design description.** A sub-design instantiated as a component inside a
-  bigger one is not addressed here; this format currently describes exactly one flat
-  design. `XactFlow`'s own linker doesn't recurse into nested designs yet either
+  bigger one is not addressed here; this format describes one level: a design, and the
+  top-level ports and bus interfaces of the component containing it. `XactFlow`'s own
+  linker doesn't recurse into nested designs yet either
   (see its README's "One level of hierarchy" limitation), so there is nothing
   downstream to hand a hierarchical result to yet regardless.
 - **Address mapping**, as above: a real system, not a vendor-extension placeholder, once
   `XactFlow` applies `DesignConfiguration`/`addressSpace`.
+- **Top-level ports copied from part of a port**: a top-level bus interface copies whole
+  internal ports. A port map onto part of an internal port (a `partSelect` or sub-port)
+  would need a top-level port of just that part, and is refused until that is designed.
+  A copied port also keeps its width as written, which can refer to a parameter of the
+  internal component that the component containing the design does not have; that needs
+  the width evaluated first.
 - **Protocol bridges** (e.g. an APB-to-OBI adapter between two incompatible bus
   segments): not addressed. `connect_bus` either finds a matching pair or fails; nothing
   here automatically adds a bridge component. A bridge, if one exists as a real

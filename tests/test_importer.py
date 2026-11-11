@@ -25,10 +25,12 @@ design.connect(debug.debug_req_o, cpu.debug_req_i)
 
 
 def _import(script: Path, library: Optional[Library] = None) -> ipxact.Design:
-    """Run the importer on the script and return the one design it added to the library."""
+    """Run the importer on the script and return the design it added to the library, checking
+    that the component containing it was added too."""
     library = Library() if library is None else library
     ArchiDescImporter().import_(script, library)
-    [design] = library.targets(ipxact.Design)
+    component, design = library.targets()
+    assert isinstance(component, ipxact.Component) and component.model.views[0].design_instantiation_ref
     return design
 
 
@@ -36,27 +38,27 @@ def test_importer_is_registered():
     assert discover_importers()["archidesc"] is ArchiDescImporter
 
 
-def test_import_runs_the_script_and_adds_the_built_design_as_a_target(tmp_path):
+def test_import_runs_the_script_and_adds_the_built_documents_as_targets(tmp_path):
     script = tmp_path / "top.py"
     script.write_text(SCRIPT)
 
     design = _import(script)
 
     assert isinstance(design, ipxact.Design)
-    assert design.vlnv == ipxact.VLNV("example.org", "soc", "top", "1.0")
+    assert design.vlnv == ipxact.VLNV("example.org", "soc", "top.design", "1.0")
     assert [i.instance_name for i in design.component_instances] == ["cpu", "ic", "debug"]
     assert [i.name for i in design.interconnections] == ["cpu_to_ic"]
     assert [c.name for c in design.ad_hoc_connections] == ["debug_debug_req_o_to_cpu_debug_req_i"]
 
 
-def test_import_records_the_script_as_the_design_source(tmp_path):
+def test_import_records_the_script_as_the_source_of_both_documents(tmp_path):
     script = tmp_path / "top.py"
     script.write_text(SCRIPT)
     library = Library()
 
-    design = _import(script, library)
+    _import(script, library)
 
-    assert library.entries[design.vlnv].path == script
+    assert [entry.path for entry in library.entries.values()] == [script, script]
 
 
 def test_import_leaves_the_documents_already_in_the_library_as_they_are(tmp_path):
@@ -65,9 +67,9 @@ def test_import_leaves_the_documents_already_in_the_library_as_they_are(tmp_path
     library = Library.scan(LIBRARY)
     looked_up = list(library.documents())
 
-    design = _import(script, library)
+    _import(script, library)
 
-    assert list(library.documents()) == looked_up + [design]
+    assert list(library.documents()) == looked_up + list(library.targets())
     assert library.diagnostics == []
 
 
@@ -75,12 +77,13 @@ def test_import_replaces_the_previous_output_of_the_script(tmp_path):
     script = tmp_path / "top.py"
     script.write_text(SCRIPT)
     library = Library()
-    library.add(ipxact.Design(vlnv=ipxact.VLNV("example.org", "soc", "top", "1.0")), tmp_path / "top.xml")
+    for kind, name in ((ipxact.Component, "top.component"), (ipxact.Design, "top.design")):
+        library.add(kind(vlnv=ipxact.VLNV("example.org", "soc", name, "1.0")), tmp_path / f"{name}.xml")
 
     design = _import(script, library)
 
     assert design.component_instances
-    assert list(library.documents(ipxact.Design)) == [design]
+    assert list(library.documents()) == list(library.targets())
     assert library.diagnostics == []
 
 
@@ -104,7 +107,7 @@ def test_script_can_import_a_module_next_to_it(tmp_path):
     script = tmp_path / "top.py"
     script.write_text("from helpers import TOP\n" + SCRIPT.replace('"example.org:soc:top:1.0"', "TOP"))
 
-    assert _import(script).vlnv.name == "top"
+    assert _import(script).vlnv.name == "top.design"
 
 
 def test_scripts_in_two_folders_each_get_their_own_helper_module(tmp_path):
@@ -116,7 +119,7 @@ def test_scripts_in_two_folders_each_get_their_own_helper_module(tmp_path):
         scripts.append(folder / "top.py")
         scripts[-1].write_text("from helpers import TOP\n" + SCRIPT.replace('"example.org:soc:top:1.0"', "TOP"))
 
-    assert [_import(script).vlnv.name for script in scripts] == ["soc_a", "soc_b"]
+    assert [_import(script).vlnv.name for script in scripts] == ["soc_a.design", "soc_b.design"]
 
 
 def test_a_package_installed_below_the_script_folder_stays_imported(tmp_path, monkeypatch):

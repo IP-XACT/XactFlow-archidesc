@@ -1,10 +1,12 @@
-# ipxact-compiler, xactflow and xactflow-design are overridden below to local sibling checkouts so edits to them
+# ipxact-compiler, xactflow, xactflow-design and xactflow-component are overridden below to local sibling checkouts so edits to them
 # take effect immediately. Assumes they are checked out as sibling directories, adjust the paths
 # if yours differ. Comment out any of those lines if you don't need it.
 -r requirements.txt
 -e ../ipxact-compiler
 -e ../XactFlow
 -e ../XactFlow-design
+-e ../XactFlow-component
 pytest
 mypy
 xactflow-design>=0.2.1
+xactflow-component>=0.2.1

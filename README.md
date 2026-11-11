@@ -1,14 +1,16 @@
 # xactflow-archidesc
 
 A [XactFlow](https://github.com/IP-XACT/XactFlow) importer plugin that turns a design described
-in a Python script (which IPs it uses, and how they are connected) into an `ipxact.Design` object,
-built on [`ipxact-compiler`](https://github.com/IP-XACT/ipxact-compiler)'s
+in a Python script (which IPs it uses, how they are connected, and what the SoC offers to the
+outside) into an `ipxact.Design` and the `ipxact.Component` containing it, built on
+[`ipxact-compiler`](https://github.com/IP-XACT/ipxact-compiler)'s
 [IEEE 1685-2022](https://standards.ieee.org/ieee/1685/10307/) object model.
 
 IP-XACT `design` files are not made to be handwritten. With this package, a short script lists
-the IP instances, the bus connections between them, and any direct signal connections. The
-importer runs the script and adds the `Design` to a XactFlow `Library` as a target, for an
-exporter to write; XactFlow's `link()` can check it against the IP-XACT rules.
+the IP instances, the bus connections between them, any direct signal connections, and the
+top-level ports and bus interfaces. The importer runs the script and adds the `Design` and the
+`Component` containing it to a XactFlow `Library` as targets, for an exporter to write;
+XactFlow's `link()` can check the design against the IP-XACT rules.
 
 The full description of the format is in
 [`doc/python-design-description.md`](doc/python-design-description.md). It describes the tool
@@ -57,7 +59,13 @@ design.connect_bus(bus, timer, base_addr=0x4002_0000, size=0x1000)
 
 design.connect(debug.debug_req_o, cpu.debug_req_i)
 design.connect(cpu.debug_resp_o, debug.debug_resp_i)
+
+design.add_port("inout", "jtag_io", connect=debug.jtag_io)
+design.add_port("out", "irq_o", connect=uart.irq_o)
 ```
+
+`Design("example.org:soc:example:0.1", ...)` names the SoC: the component is
+`example.org:soc:example.component:0.1` and the design `example.org:soc:example.design:0.1`.
 
 A runnable version of this script, with its IP library, is in
 [`tests/fixtures/soc.py`](tests/fixtures/soc.py).
@@ -71,17 +79,21 @@ In short:
   in the address map.
 - `connect(source, target)` connects two ports. `instance.some_port` is short for
   `instance.port("some_port")`.
+- `add_port(direction, name, width=None)` adds a top-level port, and
+  `add_bus(name, bus_type, mode)` a top-level bus interface. `connect()` and `connect_bus()`
+  connect them to the instances, or `connect=` does it right away. A top-level bus interface
+  gets its ports from the internal interface it connects to, named `<bus>_<logical port>`.
 
 Each call checks its arguments right away, so a mistake is reported on the line that made it.
 All the details are in [the format description](doc/python-design-description.md#the-design-object).
 
 Once installed, the importer registers itself under the `xactflow.importers` entry point group
-as `archidesc`, so it runs as a XactFlow CLI command. With `xactflow-design` installed too,
-`--then` hands the library holding the design straight to that exporter. `--lib` adds IP-XACT
-folders to that library, for an exporter that needs the instantiated components. To try it on
-the example of this repo, create a virtual environment and install the package in it first.
-The `xactflow` command only exists inside that environment, so activate it again in each new
-terminal:
+as `archidesc`, so it runs as a XactFlow CLI command. With `xactflow-design` or
+`xactflow-component` installed too, `--then` hands the library holding the design and the
+component straight to that exporter. `--lib` adds IP-XACT folders to that library, for an
+exporter that needs the instantiated components. To try it on the example of this repo,
+create a virtual environment and install the package in it first. The `xactflow` command only
+exists inside that environment, so activate it again in each new terminal:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -89,9 +101,10 @@ pip install -e ".[dev]"
 xactflow archidesc tests/fixtures/soc.py --lib tests/fixtures/library --then design --output out/
 ```
 
-This writes `out/example.org_soc_example_0.1.xml`, named after the design's VLNV. The design is
-regenerated on every run: if `out/` is also given with `--lib`, the new design replaces the one
-read from there instead of being reported as a duplicate VLNV.
+This writes `out/example.org_soc_example.design_0.1.xml`, named after the design's VLNV;
+`--then component` writes the component, `out/example.org_soc_example.component_0.1.xml`. Both
+are regenerated on every run: if `out/` is also given with `--lib`, the new documents replace
+the ones read from there instead of being reported as duplicate VLNVs.
 
 Or as a library, for example to link the design first:
 
@@ -101,13 +114,15 @@ from pathlib import Path
 import ipxact
 from xactflow import Library, link
 from xactflow_archidesc import ArchiDescImporter
+from xactflow_component import ComponentExporter
 from xactflow_design import DesignExporter
 
 library = Library.scan("ip")
 ArchiDescImporter().import_(Path("soc.py"), library)
 [design] = library.targets(ipxact.Design)
-linked = link(design, library)
+linked = link(design, library)    # finds the component containing the design in the library
 DesignExporter().export(library, Path("out"))
+ComponentExporter().export(library, Path("out"))
 ```
 
 The script runs like `python soc.py` would: a helper module next to it can be imported, and a
@@ -129,8 +144,14 @@ importer takes no options.
   `resolve="user"` can be overridden. The standard says an `immediate` parameter (the default)
   cannot be changed through configuration.
 - **Connection names are unique.** A bus connection is named `<a>_to_<b>` and a port connection
-  `<instance>_<port>_to_<instance>_<port>`. A number is added when a name is already taken, by
-  any kind of connection.
+  `<instance>_<port>_to_<instance>_<port>`, a top-level port or bus interface standing for
+  itself by its name alone. A number is added when a name is already taken, by any kind of
+  connection.
+- **Top-level IOs.** The component containing the design has one view, `hierarchical`, whose
+  `designInstantiation` refers to the design: that is how `link()` finds it. A top-level port
+  is reached with an `externalPortReference` and connects to an instance port of the same
+  direction; a top-level bus interface is reached with a `hierInterface` and connects to an
+  instance interface of the same mode, as the standard requires (SCR 2.4 to 2.10).
 - **Monitors.** Connecting a monitor interface adds a `monitorInterconnection`. The interface it
   watches stays free for a normal connection.
 
@@ -143,7 +164,10 @@ importer takes no options.
   written to the design and exported, but not applied during linking.
 - `connect` checks direction only for wire ports. Two transactional or two structured ports
   are connected with no further check, only a mix of the two kinds is refused.
-- `connect` does not compare port widths.
+- `connect` does not compare port widths, between instance ports or with a top-level port.
+- A top-level bus interface copies whole internal ports. A port map onto part of a port (a
+  `partSelect` or sub-port) is refused, and a copied port keeps its width as written, even
+  when it refers to a parameter of the internal component.
 - A design describes one level only. Hierarchical designs, a real address mapping (instead of
   the `addressMapping` placeholder) and protocol bridges are not handled yet, see the open
   questions at the end of [the format description](doc/python-design-description.md).

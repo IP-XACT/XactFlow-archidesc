@@ -43,6 +43,7 @@ dev = [
     "pytest",
     "mypy",
     "xactflow-design>=0.3.0",
+    "xactflow-component>=0.2.1",
 ]
 
 [project.entry-points."xactflow.importers"]

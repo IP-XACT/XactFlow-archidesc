@@ -11,13 +11,13 @@ from .design import BusInterfaceRef, Design, IPInstance, PortRef
 
 
 class ArchiDescImporter(Importer):
-    """Runs a Python design description script and adds the ipxact.Design it describes to a
-    Library, as a target.
+    """Runs a Python design description script and adds the ipxact.Design it describes, and the
+    ipxact.Component containing it, to a Library, as targets.
 
     The script must define a module-level variable named `design`, holding a Design. It runs
     like `python script.py` would: its own folder is importable while it runs.
 
-    The design is regenerated from the script on every run, so it replaces a design with the same
+    Both are regenerated from the script on every run, so they replace a document with the same
     VLNV already in the library, e.g. the previous output scanned from a --lib folder.
     """
 
@@ -46,7 +46,8 @@ class ArchiDescImporter(Importer):
             raise ValueError(
                 f"{source_path}: 'design' must be a xactflow_archidesc.Design, got {kind.__module__}.{kind.__qualname__}"
             )
-        library.add(design.build(), source_path, replace=True, target=True)
+        for document in (design.build_component(), design.build()):
+            library.add(document, source_path, replace=True, target=True)
 
 
 def _forget_modules_from(folder: Path, modules_before: Set[str]) -> None:

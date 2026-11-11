@@ -22,8 +22,9 @@ def design(library):
     return Design("example.org:soc:top:1.0", library)
 
 
-def test_design_vlnv_is_parsed(design):
-    assert design.build().vlnv == ipxact.VLNV("example.org", "soc", "top", "1.0")
+def test_design_vlnv_names_the_component_and_the_design(design):
+    assert design.build_component().vlnv == ipxact.VLNV("example.org", "soc", "top.component", "1.0")
+    assert design.build().vlnv == ipxact.VLNV("example.org", "soc", "top.design", "1.0")
 
 
 def test_design_rejects_malformed_vlnv(library):

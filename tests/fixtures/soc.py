@@ -23,3 +23,6 @@ design.connect_bus(bus, timer, base_addr=0x4002_0000, size=0x1000)
 
 design.connect(debug.debug_req_o, cpu.debug_req_i)
 design.connect(cpu.debug_resp_o, debug.debug_resp_i)
+
+design.add_port("inout", "jtag_io", connect=debug.jtag_io)
+design.add_port("out", "irq_o", connect=uart.irq_o)
