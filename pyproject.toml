@@ -42,7 +42,7 @@ Issues = "https://github.com/IP-XACT/XactFlow-archidesc/issues"
 dev = [
     "pytest",
     "mypy",
-    "xactflow-design>=0.3.0",
+    "xactflow-design>=0.2.1",
     "xactflow-component>=0.2.1",
 ]
 
