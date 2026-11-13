@@ -38,6 +38,25 @@ def test_the_component_has_a_view_instantiating_the_design(design):
     assert instantiation.design_ref.vlnv == design.build().vlnv
 
 
+@pytest.mark.parametrize("kwargs, module_name", [({}, "top"), ({"module_name": "soc_top"}, "soc_top")])
+def test_the_view_names_the_module_of_the_component(library, kwargs, module_name):
+    model = Design("example.org:soc:top:1.0", library, **kwargs).build_component().model
+
+    [view] = model.views
+    [instantiation] = model.component_instantiations
+    assert view.component_instantiation_ref == instantiation.name
+    assert instantiation.module_name == module_name
+
+
+@pytest.mark.parametrize(
+    "module_name, error, message",
+    [("", ValueError, "module_name must not be empty"), (1, TypeError, "module_name must be a str")],
+)
+def test_design_rejects_a_bad_module_name(library, module_name, error, message):
+    with pytest.raises(error, match=message):
+        Design("example.org:soc:top:1.0", library, module_name=module_name)
+
+
 # Ports
 
 

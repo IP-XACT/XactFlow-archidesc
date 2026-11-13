@@ -123,7 +123,7 @@ What it deliberately does not do, because \code{XactFlow} already does it elsewh
 
 \begin{lstlisting}[style=pyblock, caption={The \texttt{Design} API surface.}]
 class Design:
-    def __init__(self, vlnv: str, library: xactflow.Library) -> None: ...
+    def __init__(self, vlnv: str, library: xactflow.Library, *, module_name: str | None = None) -> None: ...
     def add_ip(self, instance_name: str, vlnv: str, parameters: dict[str, object] | None = None, transforms: list[str] | None = None) -> IPInstance: ...
     def connect_bus(self, a: IPInstance | BusInterfaceRef, b: IPInstance | BusInterfaceRef, *, base_addr: int | None = None, size: int | None = None) -> None: ...
     def connect(self, source: PortRef, target: PortRef) -> None: ...
@@ -133,7 +133,7 @@ class Design:
     def build_component(self) -> ipxact.Component: ...
 \end{lstlisting}
 
-\subsection{\texttt{Design(vlnv, library)}}
+\subsection{\texttt{Design(vlnv, library, *, module\_name=None)}}
 
 \begin{itemize}
     \item \code{vlnv}: a colon-separated \code{"vendor:library:name:version"} string
@@ -147,6 +147,12 @@ class Design:
     this itself (\code{Library.scan(...)}) and passes it in, \code{Design} never
     constructs or owns a \code{Library} implicitly. This keeps the script fully
     self-contained.
+    \item \code{module\_name}: the name of the module the component stands for, written
+    as the \code{moduleName} of its component instantiation, for an HDL generator to name
+    the module after. It defaults to the name in \code{vlnv}, before \code{.component} or
+    \code{.design} is appended: \code{example} for \code{"example.org:soc:example:0.1"}.
+    It is not checked against the identifier rules of an HDL; a value that is not a
+    \code{str} raises \code{TypeError}, an empty one \code{ValueError}.
 \end{itemize}
 
 \subsection{\texttt{add\_ip(instance\_name, vlnv, parameters=None, transforms=None) -> IPInstance}}
@@ -397,11 +403,13 @@ unused debug port) is a legitimate, common design, not an error. Completeness is
 
 Returns the \code{ipxact.Component} containing the design: every top-level port, those of
 \code{add\_port} and those \code{add\_bus} created, every \code{add\_bus} interface, and
-one view, \code{hierarchical}, whose \code{designInstantiation}
-(\code{hierarchical\_design}) refers to the design. \code{xactflow.link()} finds the
-component through that view, and checks the \code{hierInterface} and
-\code{externalPortReference} elements against it. A script with no top-level port or bus
-interface still gets this component, with the view only.
+one view, \code{hierarchical}. The view's \code{designInstantiation}
+(\code{hierarchical\_design}) refers to the design, and its
+\code{componentInstantiation} (\code{hierarchical\_rtl}) names the module,
+\code{module\_name}. \code{xactflow.link()} finds the component through that view, and
+checks the \code{hierInterface} and \code{externalPortReference} elements against it. A
+script with no top-level port or bus interface still gets this component, with the view
+and its two instantiations only.
 
 Scripts don't call \code{build()} or \code{build\_component()} themselves. The importer
 does, after running the script, see below.

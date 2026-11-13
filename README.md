@@ -66,6 +66,8 @@ design.add_port("out", "irq_o", connect=uart.irq_o)
 
 `Design("example.org:soc:example:0.1", ...)` names the SoC: the component is
 `example.org:soc:example.component:0.1` and the design `example.org:soc:example.design:0.1`.
+The component's module is called `example`, or what `module_name=` gives, so an HDL
+generator knows what to name it.
 
 A runnable version of this script, with its IP library, is in
 [`tests/fixtures/soc.py`](tests/fixtures/soc.py).
@@ -148,7 +150,8 @@ importer takes no options.
   itself by its name alone. A number is added when a name is already taken, by any kind of
   connection.
 - **Top-level IOs.** The component containing the design has one view, `hierarchical`, whose
-  `designInstantiation` refers to the design: that is how `link()` finds it. A top-level port
+  `designInstantiation` refers to the design: that is how `link()` finds it. Its
+  `componentInstantiation` gives the `moduleName`. A top-level port
   is reached with an `externalPortReference` and connects to an instance port of the same
   direction; a top-level bus interface is reached with a `hierInterface` and connects to an
   instance interface of the same mode, as the standard requires (SCR 2.4 to 2.10).

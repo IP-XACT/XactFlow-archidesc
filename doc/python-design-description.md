@@ -51,7 +51,7 @@ What it deliberately does not do, because `XactFlow` already does it elsewhere:
 
 ```python
 class Design:
-    def __init__(self, vlnv: str, library: xactflow.Library) -> None: ...
+    def __init__(self, vlnv: str, library: xactflow.Library, *, module_name: str | None = None) -> None: ...
     def add_ip(self, instance_name: str, vlnv: str, parameters: dict[str, object] | None = None, transforms: list[str] | None = None) -> IPInstance: ...
     def connect_bus(self, a: IPInstance | BusInterfaceRef, b: IPInstance | BusInterfaceRef, *, base_addr: int | None = None, size: int | None = None) -> None: ...
     def connect(self, source: PortRef, target: PortRef) -> None: ...
@@ -61,7 +61,7 @@ class Design:
     def build_component(self) -> ipxact.Component: ...
 ```
 
-### `Design(vlnv, library)`
+### `Design(vlnv, library, *, module_name=None)`
 
 - `vlnv`: a colon-separated `"vendor:library:name:version"` string naming what the script
   describes. The two documents it produces need their own VLNVs: the component containing
@@ -72,6 +72,12 @@ class Design:
 - `library`: an already-scanned `xactflow.Library`. The script builds this itself
   (`Library.scan(...)`) and passes it in, `Design` never constructs or owns a `Library`
   implicitly. This keeps the script fully self-contained.
+- `module_name`: the name of the module the component stands for, written as the
+  `moduleName` of its component instantiation, for an HDL generator to name the module
+  after. It defaults to the name in `vlnv`, before `.component` or `.design` is appended:
+  `example` for `"example.org:soc:example:0.1"`. It is not checked against the identifier
+  rules of an HDL; a value that is not a `str` raises `TypeError`, an empty one
+  `ValueError`.
 
 ### `add_ip(instance_name, vlnv, parameters=None, transforms=None) -> IPInstance`
 
@@ -289,10 +295,12 @@ not this importer's.
 
 Returns the `ipxact.Component` containing the design: every top-level port, those of
 `add_port` and those `add_bus` created, every `add_bus` interface, and one view,
-`hierarchical`, whose `designInstantiation` (`hierarchical_design`) refers to the design.
-`xactflow.link()` finds the component through that view, and checks the `hierInterface`
-and `externalPortReference` elements against it. A script with no top-level port or bus
-interface still gets this component, with the view only.
+`hierarchical`. The view's `designInstantiation` (`hierarchical_design`) refers to the
+design, and its `componentInstantiation` (`hierarchical_rtl`) names the module,
+`module_name`. `xactflow.link()` finds the component through that view, and checks the
+`hierInterface` and `externalPortReference` elements against it. A script with no
+top-level port or bus interface still gets this component, with the view and its two
+instantiations only.
 
 Scripts don't call `build()` or `build_component()` themselves. The importer does, after
 running the script, see below.

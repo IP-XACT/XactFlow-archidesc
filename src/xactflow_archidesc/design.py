@@ -21,8 +21,8 @@ XACTFLOW_NAMESPACE = "https://github.com/IP-XACT/XactFlow"
 # ":" is also allowed there but left out.
 _NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*")
 
-# The view of the component containing the design, and its designInstantiation.
 _VIEW = "hierarchical"
+_COMPONENT_INSTANTIATION = "hierarchical_rtl"
 _DESIGN_INSTANTIATION = "hierarchical_design"
 
 _Direction = ipxact.Direction
@@ -446,17 +446,26 @@ def _transforms_extensions(where: str, transforms: Optional[List[str]]) -> List[
 
 
 class Design:
-    """Describes one design: its component instances, how they are connected, and the top-level
-    ports and bus interfaces of the component containing it.
+    """Describes one design and the component containing it.
 
-    vlnv names the whole: the component gets <name>.component and the design <name>.design.
-    build() turns it into an ipxact.Design, build_component() into the ipxact.Component.
+    The design holds the component instances and how they are connected. The component holds
+    the top-level ports and bus interfaces, and names the module that HDL is generated for.
+
+    For a vlnv named <name>, the design is <name>.design and the component <name>.component.
+    The module is called <name> unless module_name gives another name.
+
+    build() returns the ipxact.Design and build_component() the ipxact.Component.
     """
 
-    def __init__(self, vlnv: str, library: Library) -> None:
+    def __init__(self, vlnv: str, library: Library, *, module_name: Optional[str] = None) -> None:
         base = _parse_vlnv(vlnv, "Design(): vlnv")
         self.vlnv = replace(base, name=f"{base.name}.design")
         self.component_vlnv = replace(base, name=f"{base.name}.component")
+        if module_name is None:
+            module_name = base.name
+        elif not _check_type(module_name, str, "Design(): module_name"):
+            raise ValueError("Design(): module_name must not be empty")
+        self.module_name = module_name
         self.library = library
         self._instances: Dict[str, _InstanceRecord] = {}
         # The top-level ports, each with the call that added it, and the top-level bus interfaces.
@@ -663,12 +672,21 @@ class Design:
 
     def build_component(self) -> ipxact.Component:
         """Return the ipxact.Component containing the design: the top-level ports and bus
-        interfaces, and a view instantiating the design."""
+        interfaces, and a view instantiating the design and naming its module."""
         return ipxact.Component(
             vlnv=self.component_vlnv,
             bus_interfaces=list(self._buses.values()),
             model=ipxact.Model(
-                views=[ipxact.View(name=_VIEW, design_instantiation_ref=_DESIGN_INSTANTIATION)],
+                views=[
+                    ipxact.View(
+                        name=_VIEW,
+                        component_instantiation_ref=_COMPONENT_INSTANTIATION,
+                        design_instantiation_ref=_DESIGN_INSTANTIATION,
+                    )
+                ],
+                component_instantiations=[
+                    ipxact.ComponentInstantiation(name=_COMPONENT_INSTANTIATION, module_name=self.module_name)
+                ],
                 design_instantiations=[
                     ipxact.DesignInstantiation(name=_DESIGN_INSTANTIATION, design_ref=ipxact.VLNVRef(**asdict(self.vlnv)))
                 ],
