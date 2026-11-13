@@ -85,6 +85,9 @@ In short:
   `add_bus(name, bus_type, mode)` a top-level bus interface. `connect()` and `connect_bus()`
   connect them to the instances, or `connect=` does it right away. A top-level bus interface
   gets its ports from the internal interface it connects to, named `<bus>_<logical port>`.
+- `connect_clk(source)` and `connect_rst(source)` connect a clock or a reset to every
+  instance `in` port with the `isClock` or `isReset` qualifier that nothing drives yet. A
+  top-level source gets the qualifier too.
 
 Each call checks its arguments right away, so a mistake is reported on the line that made it.
 All the details are in [the format description](doc/python-design-description.md#the-design-object).
@@ -168,6 +171,8 @@ importer takes no options.
 - `connect` checks direction only for wire ports. Two transactional or two structured ports
   are connected with no further check, only a mix of the two kinds is refused.
 - `connect` does not compare port widths, between instance ports or with a top-level port.
+- `connect_rst` ignores the reset level (`isReset level="low"` or `"high"`): the source and
+  the reset ports it connects are considered active at the same level.
 - A top-level bus interface copies whole internal ports. A port map onto part of a port (a
   `partSelect` or sub-port) is refused, and a copied port keeps its width as written, even
   when it refers to a parameter of the internal component.

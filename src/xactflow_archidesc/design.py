@@ -47,6 +47,11 @@ _INSIDE_DIRECTION = {
 # The directions add_port() accepts.
 _TOP_DIRECTIONS = (_Direction.IN, _Direction.OUT, _Direction.INOUT)
 
+_QUALIFIERS = {
+    "connect_clk": ("is_clock", "isClock", lambda: True),
+    "connect_rst": ("is_reset", "isReset", lambda: ipxact.LevelFlag(True)),
+}
+
 # The bus interface modes that can be connected together (IEEE 1685-2022 SCR 2.4, 2.5, 2.8, 2.9).
 _MODE_PAIRS = {
     frozenset((_Mode.INITIATOR, _Mode.TARGET)),
@@ -194,6 +199,12 @@ def _port_problem(source: PortRef, target: PortRef) -> Optional[str]:
             return "a top-level port needs an instance port of the same direction, or an 'inout' one"
         return "needs one 'in' and one 'out' port, or an 'inout' one"
     return None
+
+
+def _qualified(port: ipxact.Port, flag: str) -> bool:
+    """Whether a wire port has the qualifier flag set, e.g. isClock, whatever its level."""
+    value = getattr(port.wire.qualifier, flag, None) if port.wire is not None else None
+    return bool(value.value if isinstance(value, ipxact.LevelFlag) else value)
 
 
 def _describe_bus(ref: BusInterfaceRef) -> str:
@@ -584,6 +595,16 @@ class Design:
         )
         self._driven_ports.update((ref, name) for ref in driven)
 
+    def connect_clk(self, source: PortRef) -> List[PortRef]:
+        """Connect source to every instance input port with the isClock qualifier that nothing
+        drives yet, and return them."""
+        return self._connect_qualified("connect_clk", source)
+
+    def connect_rst(self, source: PortRef) -> List[PortRef]:
+        """Connect source to every instance input port with the isReset qualifier that nothing
+        drives yet, and return them. Reset levels are not compared."""
+        return self._connect_qualified("connect_rst", source)
+
     def connect_bus(
         self,
         a: Union[IPInstance, BusInterfaceRef],
@@ -713,6 +734,35 @@ class Design:
         if _system_group(bus_a) != _system_group(bus_b):
             return _NO_GROUP
         return None
+
+    def _connect_qualified(self, call: str, source: PortRef) -> List[PortRef]:
+        """connect() source to the free input ports of the other instances with the qualifier of
+        call. A top-level source gets that qualifier too."""
+        flag, element, make_flag = _QUALIFIERS[call]
+        self._check_ref(_check_type(source, PortRef, f"{call}(): source"), f"{call}(): source")
+        where = f"{call}({_describe(source)})"
+        if _inside_direction(source) not in (_Direction.OUT, _Direction.INOUT):
+            raise ValueError(
+                f"{where}: the source must drive the ports it connects to: a top-level 'in' or 'inout' "
+                f"wire port, or an instance 'out' or 'inout' one"
+            )
+        targets = [
+            ref
+            for record in self._instances.values()
+            if record.instance is not source.instance and record.instance.component.model is not None
+            for ref in (PortRef(record.instance, port.name, port) for port in record.instance.component.model.ports)
+            if _inside_direction(ref) == _Direction.IN and _qualified(ref.port, flag) and ref not in self._driven_ports
+        ]
+        if not targets:
+            raise ValueError(f"{where}: no instance has an 'in' port with the {element} qualifier left to connect")
+        wire = source.port.wire
+        if source.instance is None and wire is not None and not _qualified(source.port, flag):
+            if wire.qualifier is None:
+                wire.qualifier = ipxact.Qualifier()
+            setattr(wire.qualifier, flag, make_flag())
+        for target in targets:
+            self.connect(source, target)
+        return targets
 
     def _bus_family(self, bus: ipxact.BusInterface) -> FrozenSet[ipxact.VLNV]:
         vlnv = bus.bus_type.vlnv

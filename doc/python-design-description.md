@@ -57,6 +57,8 @@ class Design:
     def connect(self, source: PortRef, target: PortRef) -> None: ...
     def add_port(self, direction: str, name: str, width: int | None = None, *, connect: PortRef | None = None) -> PortRef: ...
     def add_bus(self, name: str, bus_type: str, mode: str, *, group: str | None = None, connect: IPInstance | BusInterfaceRef | None = None) -> BusInterfaceRef: ...
+    def connect_clk(self, source: PortRef) -> list[PortRef]: ...
+    def connect_rst(self, source: PortRef) -> list[PortRef]: ...
     def build(self) -> ipxact.Design: ...
     def build_component(self) -> ipxact.Component: ...
 ```
@@ -282,6 +284,40 @@ width). `ext_if` connected to an interface mapping the logical ports `CLK` and `
 gives the top-level ports `ext_if_CLK` and `ext_if_DATA`. A name already taken by another
 top-level port raises `ValueError`.
 
+### `connect_clk(source) -> list[PortRef]` and `connect_rst(source) -> list[PortRef]`
+
+Connect one clock, or one reset, to every instance that takes it, instead of one
+`connect()` call per instance:
+
+```python
+design.connect_clk(design.add_port("in", "clk_i"))
+design.connect_rst(design.add_port("in", "rst_ni"))
+```
+
+An instance port takes it when it is an `in` wire port with the IEEE 1685-2022 qualifier
+`isClock` (for `connect_clk`) or `isReset` (for `connect_rst`) set to `true`. Port names
+are not looked at: an IP declares its clock and reset ports through these qualifiers, in
+its component file.
+
+- `source` is the `PortRef` that drives them: a top-level `in` or `inout` port, or an
+  `out` or `inout` port of an instance, a clock generator for example. Any other port
+  raises `ValueError`.
+- Every instance added so far is looked at, except the source's own instance. An instance
+  added afterwards is not connected.
+- A port that is already driven, by an earlier `connect()` for example, is left as it is.
+  So a few ports can be given another clock first, and `connect_clk` connects the rest.
+- Each port is connected exactly as `connect(source, port)` would, with the same name.
+  Nothing left to connect raises `ValueError`, since the script expected at least one.
+- A top-level `source` gets the same qualifier, so the component containing the design
+  declares its own clock and reset ports, for a bigger design to connect them the same
+  way. It gets `isReset` with no `level`.
+- How reset levels are handled is an open question, see
+  [Open questions](#open-questions-deferred-rather-than-silently-resolved).
+
+Returns the instance ports it connected, in instance then port order. No SCR covers
+qualifiers on component ports or what a clock or reset port may connect to: these rules
+are this format's own.
+
 ### `build() -> ipxact.Design`
 
 Returns the finished `ipxact.Design`: every `add_ip` as a `ComponentInstance` (in call
@@ -397,6 +433,11 @@ Things this first version leaves open, on purpose:
   A copied port also keeps its width as written, which can refer to a parameter of the
   internal component that the component containing the design does not have; that needs
   the width evaluated first.
+- **Reset levels**: `isReset` carries the level at which a reset is active, `low` or
+  `high`. `connect_rst` does not compare it for now: the source and every reset port it
+  connects are considered active at the same level, and the script author makes sure
+  they are. A port of the other level would need an inverter, which an ad hoc connection
+  cannot express, so a mismatch could be refused or reported once this is designed.
 - **Protocol bridges** (e.g. an APB-to-OBI adapter between two incompatible bus
   segments): not addressed. `connect_bus` either finds a matching pair or fails; nothing
   here automatically adds a bridge component. A bridge, if one exists as a real
